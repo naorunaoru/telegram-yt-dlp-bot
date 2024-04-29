@@ -5,14 +5,15 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
-    "download": "npx ts-node src/prepare.ts",
-    "start": "npx ts-node src/main.ts"
+    "download": "node dist/prepare.js",
+    "start": "node dist/main.js"
   },
   "author": "@naoru",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.5",
     "node-telegram-bot-api": "^0.65.1",
+    "ts-node": "^10.9.2",
     "yt-dlp-wrap": "^2.3.12"
   },
   "devDependencies": {

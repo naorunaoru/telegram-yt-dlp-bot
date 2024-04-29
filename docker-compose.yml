@@ -1,0 +1,10 @@
+version: "3.3"
+
+services:
+  media-grabber-bot:
+    build: .
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+    env_file:
+      - .env
