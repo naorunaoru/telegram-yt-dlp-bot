@@ -1,0 +1,21 @@
+{
+  "name": "telegram-grabber-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "download": "npx ts-node src/prepare.ts",
+    "start": "npx ts-node src/main.ts"
+  },
+  "author": "@naoru",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.65.1",
+    "yt-dlp-wrap": "^2.3.12"
+  },
+  "devDependencies": {
+    "@types/node-telegram-bot-api": "^0.64.6"
+  }
+}
