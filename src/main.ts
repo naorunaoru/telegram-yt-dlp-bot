@@ -3,7 +3,7 @@ import YTDlpWrap from "yt-dlp-wrap";
 import dotenv from "dotenv";
 import { createWriteStream, unlink } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { patterns } from "./patterns";
 
@@ -42,10 +42,11 @@ bot.on("message", async (msg) => {
           ? pattern.formatMetadata(metadata)
           : "Video metadata unavailable";
 
-        const notifyMsg = await bot.sendMessage(
-          msg.chat.id,
-          `Downloading\n${formattedMetadata}`
-        );
+        const staticImagePath = resolve(__dirname, "../static/processing.jpeg");
+        const notifyMsg = await bot.sendPhoto(msg.chat.id, staticImagePath, {
+          caption: `Downloading\n${formattedMetadata}`,
+          reply_to_message_id: msg.message_id,
+        });
 
         const downloadArgs = [url, ...pattern.flags];
 
@@ -57,12 +58,22 @@ bot.on("message", async (msg) => {
         stream.pipe(fileStream);
 
         fileStream.on("finish", async () => {
-          await bot.sendVideo(msg.chat.id, tempFilePath, {
-            caption: `${formattedMetadata}`,
-            reply_to_message_id: msg.message_id,
+          await bot.editMessageCaption("Sending media...", {
+            chat_id: notifyMsg.chat.id,
+            message_id: notifyMsg.message_id,
           });
 
-          bot.deleteMessage(msg.chat.id, notifyMsg.message_id);
+          await bot.editMessageMedia(
+            {
+              caption: `${formattedMetadata}`,
+              media: "attach://" + tempFilePath,
+              type: "video",
+            },
+            {
+              chat_id: notifyMsg.chat.id,
+              message_id: notifyMsg.message_id,
+            }
+          );
 
           unlink(tempFilePath, (err) => {
             if (err) console.error(`Error deleting file: ${err}`);
