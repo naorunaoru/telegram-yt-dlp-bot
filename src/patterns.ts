@@ -16,4 +16,12 @@ const instagramPattern: PatternConfig = {
     `Instagram Post: ${metadata.title || "No title available"}`,
 };
 
-export const patterns = [tiktokPattern, instagramPattern];
+const ytShortsPattern: PatternConfig = {
+  regex:
+    /https?:\/\/(?:www\.)?youtube\.com(?:\/)(shorts\/[^\/?#&]+)+/i,
+  flags: [],
+  formatMetadata: (metadata) =>
+    `Youtube Shorts Post: ${metadata.title || "No title available"}`,
+};
+
+export const patterns = [tiktokPattern, instagramPattern, ytShortsPattern];
