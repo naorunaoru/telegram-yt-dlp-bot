@@ -3,7 +3,7 @@ name: Docker Publish
 on:
   push:
     branches:
-      - main
+      - mistress
       - 'feature/**'
   pull_request:
     branches:
