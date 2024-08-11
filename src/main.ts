@@ -70,7 +70,7 @@ bot.on("message", async (msg) => {
         });
       } catch (error: any) {
         await bot.sendMessage(msg.chat.id, `Error processing your request.`);
-        console.error(error?.code, error?.response?.body);
+        console.error(error);
       }
       break;
     }
