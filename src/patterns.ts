@@ -10,7 +10,7 @@ const tiktokPattern: PatternConfig = {
 
 const instagramPattern: PatternConfig = {
   regex:
-    /https?:\/\/(?:www\.)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel|stories\/[^\/]+\/\d+)\/[^\/?#&]+/i,
+    /https?:\/\/(?:www\.)?(?:dd)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel|stories\/[^\/]+\/\d+)\/[^\/?#&]+/i,
   flags: [],
   formatMetadata: (metadata) =>
     `Instagram Post: ${metadata.title || "No title available"}`,
