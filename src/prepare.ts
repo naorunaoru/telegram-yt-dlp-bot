@@ -1,12 +1,18 @@
-const YTDlpWrap = require("yt-dlp-wrap").default;
+import YTDlpWrap from "yt-dlp-wrap";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const version = process.env.YTDLP_VERSION;
 
 const downloadYtDlp = async () => {
-  const githubReleasesData = await YTDlpWrap.getGithubReleases(1, 1);
-
-  console.log(`Downloading ${githubReleasesData[0].name}...`);
-
   try {
-    await YTDlpWrap.downloadFromGithub();
+    console.log(
+      version
+        ? `Downloading yt-dlp version ${version}...`
+        : "Downloading latest yt-dlp..."
+    );
+    await YTDlpWrap.downloadFromGithub(undefined, version);
     console.log(`Downloaded.`);
     process.exit(0);
   } catch (e) {
