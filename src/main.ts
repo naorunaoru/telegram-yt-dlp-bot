@@ -10,6 +10,7 @@ import { patterns } from "./patterns";
 dotenv.config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
+const VERBOSE = process.env.VERBOSE === "true";
 
 if (!token) {
   console.error(
@@ -36,16 +37,20 @@ bot.on("message", async (msg) => {
       const url = match[0];
 
       try {
+        let notifyMsg: TelegramBot.Message | undefined;
+
         const metadata = await ytDlpWrap.getVideoInfo(url);
 
         const formattedMetadata = pattern.formatMetadata
           ? pattern.formatMetadata(metadata)
           : "Video metadata unavailable";
 
-        const notifyMsg = await bot.sendMessage(
-          msg.chat.id,
-          `Downloading\n${formattedMetadata}`
-        );
+        if (VERBOSE) {
+          notifyMsg = await bot.sendMessage(
+            msg.chat.id,
+            `Downloading\n${formattedMetadata}`
+          );
+        }
 
         const downloadArgs = [url, ...pattern.flags];
 
@@ -62,14 +67,19 @@ bot.on("message", async (msg) => {
             reply_to_message_id: msg.message_id,
           });
 
-          bot.deleteMessage(msg.chat.id, notifyMsg.message_id);
+          if (VERBOSE && notifyMsg) {
+            bot.deleteMessage(msg.chat.id, notifyMsg.message_id);
+          }
 
           unlink(tempFilePath, (err) => {
             if (err) console.error(`Error deleting file: ${err}`);
           });
         });
       } catch (error: any) {
-        await bot.sendMessage(msg.chat.id, `Error processing your request.`);
+        if (VERBOSE) {
+          await bot.sendMessage(msg.chat.id, `Error processing your request.`);
+        }
+
         console.error(error);
       }
       break;
