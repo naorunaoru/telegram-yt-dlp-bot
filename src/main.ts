@@ -1,19 +1,28 @@
 import { Telegraf } from "telegraf";
 import YTDlpWrap from "yt-dlp-wrap";
 import dotenv from "dotenv";
-import { patterns } from "./patterns";
 import { message } from "telegraf/filters";
+import fs from "fs";
+import path from "path";
+
+import { patterns } from "./patterns";
+import { truncateWithEllipsis } from "./helpers/text";
 
 dotenv.config();
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const VERBOSE = process.env.VERBOSE === "true";
+const TEMP_DIR = "./temp";
 
-if (!token) {
+if (!TOKEN) {
   console.error(
     "Telegram bot token is not provided. Please set TELEGRAM_BOT_TOKEN in your environment variables."
   );
   process.exit(1);
+}
+
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR);
 }
 
 const formatLog = (ctx: any, text?: string) => {
@@ -22,34 +31,51 @@ const formatLog = (ctx: any, text?: string) => {
   return `[User: ${userId}, Chat: ${chatId}] ${text ? text : ""}`;
 };
 
-const bot = new Telegraf(token);
+const bot = new Telegraf(TOKEN);
 const ytDlpWrap = new YTDlpWrap("./yt-dlp");
 
-const execStreamWithLogging = async (
+const downloadVideo = async (
   ctx: any,
-  args: string[]
-): Promise<NodeJS.ReadableStream> => {
-  console.log(formatLog(ctx, `Launching yt-dlp with args: ${args.join(" ")}`));
+  url: string,
+  flags: string[]
+): Promise<string> => {
+  const outputPath = path.join(TEMP_DIR, `video-${Date.now()}.mp4`);
 
-  const stream = await ytDlpWrap.execStream(args);
+  return new Promise((resolve, reject) => {
+    console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
 
-  stream
-    .on("progress", (progress) =>
+    const download = ytDlpWrap.exec([url, "-o", outputPath, ...flags]);
+
+    let messageId: number | undefined;
+
+    download.on("progress", async (progress) => {
       console.log(
         formatLog(ctx),
         progress.percent,
         progress.totalSize,
         progress.currentSpeed,
         progress.eta
-      )
-    )
-    .on("ytDlpEvent", (eventType, eventData) =>
-      console.log(formatLog(ctx), eventType, eventData)
-    )
-    .on("error", (error) => console.error(formatLog(ctx), error))
-    .on("close", () => console.log(formatLog(ctx), "all done"));
+      );
+    });
 
-  return stream;
+    download.on("ytDlpEvent", (eventType, eventData) =>
+      console.log(formatLog(ctx), eventType, eventData)
+    );
+
+    download.on("error", (error) => {
+      console.error(formatLog(ctx, `Download error: ${error}`));
+      fs.unlink(outputPath, () => {});
+      reject(error);
+    });
+
+    download.on("close", () => {
+      console.log(formatLog(ctx, "Download completed"));
+      if (messageId) {
+        ctx.deleteMessage(messageId).catch(() => {});
+      }
+      resolve(outputPath);
+    });
+  });
 };
 
 bot.on(message("text"), async (ctx) => {
@@ -64,50 +90,38 @@ bot.on(message("text"), async (ctx) => {
       console.log(formatLog(ctx, `Matched regex for URL: ${url}`));
 
       try {
-        let notifyMsg;
-
         console.log(formatLog(ctx, `Fetching metadata for URL: ${url}`));
 
-        const downloadArgs = [url, ...pattern.flags];
-
         const metadata = await ytDlpWrap.getVideoInfo([
-          ...downloadArgs,
+          url,
           "-f",
           "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+          ...pattern.flags,
         ]);
 
-        const formattedMetadata = pattern.formatMetadata
-          ? pattern.formatMetadata(metadata)
-          : "Video metadata unavailable";
+        const formattedMetadata = truncateWithEllipsis(
+          pattern.formatMetadata ? pattern.formatMetadata(metadata) : undefined,
+          {
+            maxLength: 250,
+            ellipsis: " ...",
+            preserveWords: true,
+          }
+        );
 
-        if (VERBOSE) {
-          notifyMsg = await ctx.reply(`Downloading\n${formattedMetadata}`);
-        }
-
-        const stream = await execStreamWithLogging(ctx, downloadArgs);
+        const videoPath = await downloadVideo(ctx, url, pattern.flags);
 
         console.log(formatLog(ctx, "Starting video upload..."));
 
-        // Set up error handler for the stream
-        stream.on("error", (error) => {
-          console.error(formatLog(ctx, `Stream error: ${error}`));
-          if (VERBOSE) {
-            ctx.reply("Error while processing the video stream.");
+        await ctx.replyWithVideo({ source: fs.createReadStream(videoPath) }, {
+          caption: formattedMetadata,
+          reply_to_message_id: ctx.message.message_id,
+        } as any);
+
+        fs.unlink(videoPath, (err) => {
+          if (err) {
+            console.error(formatLog(ctx, `Error deleting temp file: ${err}`));
           }
         });
-
-        // Send the video directly from the stream
-        await ctx.replyWithVideo(
-          { source: stream, filename: `video-${Date.now()}.mp4` },
-          {
-            caption: formattedMetadata,
-            reply_to_message_id: ctx.message.message_id,
-          } as any
-        );
-
-        if (VERBOSE && notifyMsg) {
-          await ctx.deleteMessage(notifyMsg.message_id);
-        }
 
         console.log(formatLog(ctx, "Video upload completed"));
       } catch (error: any) {

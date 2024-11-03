@@ -5,7 +5,7 @@ const tiktokPattern: PatternConfig = {
     /https?:\/\/(?:www\.tiktok\.com\/(?:embed\/|@[\w.-]+?\/video\/)|(?:vm|vt)\.tiktok\.com\/|www\.tiktok\.com\/t\/)([\w\d]+)/i,
   flags: [],
   formatMetadata: (metadata) =>
-    `TikTok Video: ${metadata.title || "No title available"}`,
+    metadata.title ? `TikTok Video: ${metadata.title}` : undefined,
 };
 
 const instagramPattern: PatternConfig = {
@@ -13,22 +13,22 @@ const instagramPattern: PatternConfig = {
     /https?:\/\/(?:www\.)?(?:dd)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel|stories\/[^\/]+\/\d+)\/[^\/?#&]+/i,
   flags: [],
   formatMetadata: (metadata) =>
-    `Instagram Post: ${metadata.title || "No title available"}`,
+    metadata.title ? `Instagram Post: ${metadata.title}` : undefined,
 };
 
 const ytShortsPattern: PatternConfig = {
   regex: /https?:\/\/(?:www\.)?youtube\.com(?:\/)(shorts\/[^\/?#&]+)+/i,
   flags: [],
   formatMetadata: (metadata) =>
-    `Youtube Shorts Post: ${metadata.title || "No title available"}`,
+    metadata.title ? `Youtube Short: ${metadata.title}` : undefined,
 };
 
 const redditPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?:(?:r|user)\/[^/]+\/)?(?:(?:comments\/[^/]+\/[^/]+)|(?:s\/[^/?#&]+))/i,
-  flags: ["--no-hls-use-mpegts"],
+  flags: ["-f", "(bv*+ba/b)[protocol^=http][protocol!*=dash]"],
   formatMetadata: (metadata) =>
-    `Reddit Post: ${metadata.title || "No title available"}`,
+    metadata.title ? `Reddit Post: ${metadata.title}` : undefined,
 };
 
 const twitterPattern: PatternConfig = {
@@ -36,7 +36,7 @@ const twitterPattern: PatternConfig = {
     /https?:\/\/(?:(?:www|m(?:obile)?)\.)?(?:(?:twitter|x)\.com|twitter3e4tixl4xyajtrzo62zg5vztmjuricljdp2c5kshju4avyoid\.onion)\//i,
   flags: [],
   formatMetadata: (metadata) =>
-    `Twitter/X Post: ${metadata.title || "No title available"}`,
+    metadata.title ? `Tweet: ${metadata.title}` : undefined,
 };
 
 export const patterns = [
