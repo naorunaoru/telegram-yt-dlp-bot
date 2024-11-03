@@ -17,11 +17,32 @@ const instagramPattern: PatternConfig = {
 };
 
 const ytShortsPattern: PatternConfig = {
-  regex:
-    /https?:\/\/(?:www\.)?youtube\.com(?:\/)(shorts\/[^\/?#&]+)+/i,
+  regex: /https?:\/\/(?:www\.)?youtube\.com(?:\/)(shorts\/[^\/?#&]+)+/i,
   flags: [],
   formatMetadata: (metadata) =>
     `Youtube Shorts Post: ${metadata.title || "No title available"}`,
 };
 
-export const patterns = [tiktokPattern, instagramPattern, ytShortsPattern];
+const redditPattern: PatternConfig = {
+  regex:
+    /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?P<slug>(?:(?:r|user)\/[^/]+\/)?comments\/(?P<id>[^/?#&]+))\//i,
+  flags: [],
+  formatMetadata: (metadata) =>
+    `Reddit Post: ${metadata.title || "No title available"}`,
+};
+
+const twitterPattern: PatternConfig = {
+  regex:
+    /https?:\/\/(?:(?:www|m(?:obile)?)\.)?(?:(?:twitter|x)\.com|twitter3e4tixl4xyajtrzo62zg5vztmjuricljdp2c5kshju4avyoid\.onion)\//i,
+  flags: [],
+  formatMetadata: (metadata) =>
+    `Twitter/X Post: ${metadata.title || "No title available"}`,
+};
+
+export const patterns = [
+  tiktokPattern,
+  instagramPattern,
+  ytShortsPattern,
+  redditPattern,
+  twitterPattern,
+];
