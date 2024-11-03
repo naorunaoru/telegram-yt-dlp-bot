@@ -18,7 +18,7 @@ const instagramPattern: PatternConfig = {
 
 const ytShortsPattern: PatternConfig = {
   regex: /https?:\/\/(?:www\.)?youtube\.com(?:\/)(shorts\/[^\/?#&]+)+/i,
-  flags: [],
+  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
   formatMetadata: (metadata) =>
     metadata.title ? `Youtube Short: ${metadata.title}` : undefined,
 };
