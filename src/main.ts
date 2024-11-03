@@ -1,10 +1,8 @@
-import TelegramBot from "node-telegram-bot-api";
+import { Telegraf } from "telegraf";
 import YTDlpWrap from "yt-dlp-wrap";
 import dotenv from "dotenv";
-import { createWriteStream, unlink } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { patterns } from "./patterns";
+import { message } from "telegraf/filters";
 
 dotenv.config();
 
@@ -18,102 +16,116 @@ if (!token) {
   process.exit(1);
 }
 
-const formatLog = (msg: TelegramBot.Message, text: string) => {
-  return `[User: ${msg.from?.id}, Chat: ${msg.chat.id}] ${text}`;
+const formatLog = (ctx: any, text?: string) => {
+  const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
+  return `[User: ${userId}, Chat: ${chatId}] ${text ? text : ""}`;
 };
 
-let bot: TelegramBot;
-try {
-  bot = new TelegramBot(token, { polling: true });
-} catch (error) {
-  console.error("Failed to create TelegramBot instance:", error);
-  process.exit(1);
-}
-
+const bot = new Telegraf(token);
 const ytDlpWrap = new YTDlpWrap("./yt-dlp");
 
 const execStreamWithLogging = async (
-  msg: TelegramBot.Message,
+  ctx: any,
   args: string[]
 ): Promise<NodeJS.ReadableStream> => {
-  console.log(formatLog(msg, `Launching yt-dlp with args: ${args.join(" ")}`));
+  console.log(formatLog(ctx, `Launching yt-dlp with args: ${args.join(" ")}`));
 
-  return ytDlpWrap.execStream(args);
+  const stream = await ytDlpWrap.execStream(args);
+
+  stream
+    .on("progress", (progress) =>
+      console.log(
+        formatLog(ctx),
+        progress.percent,
+        progress.totalSize,
+        progress.currentSpeed,
+        progress.eta
+      )
+    )
+    .on("ytDlpEvent", (eventType, eventData) =>
+      console.log(formatLog(ctx), eventType, eventData)
+    )
+    .on("error", (error) => console.error(formatLog(ctx), error))
+    .on("close", () => console.log(formatLog(ctx), "all done"));
+
+  return stream;
 };
 
-bot.on("message", async (msg) => {
+bot.on(message("text"), async (ctx) => {
+  const messageText = ctx.message.text;
+  if (!messageText) return;
+
   for (const pattern of patterns) {
-    const match = msg.text?.match(pattern.regex);
+    const match = messageText.match(pattern.regex);
 
     if (match) {
       const url = match[0];
-      console.log(formatLog(msg, `Matched regex for URL: ${url}`));
+      console.log(formatLog(ctx, `Matched regex for URL: ${url}`));
 
       try {
-        let notifyMsg: TelegramBot.Message | undefined;
+        let notifyMsg;
 
-        console.log(formatLog(msg, `Fetching metadata for URL: ${url}`));
+        console.log(formatLog(ctx, `Fetching metadata for URL: ${url}`));
 
-        const downloadArgs = [
-          url,
-          ...pattern.flags,
+        const downloadArgs = [url, ...pattern.flags];
+
+        const metadata = await ytDlpWrap.getVideoInfo([
+          ...downloadArgs,
           "-f",
-          "bestvideo*+bestaudio/best",
-        ];
-
-        const metadata = await ytDlpWrap.getVideoInfo(downloadArgs);
+          "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+        ]);
 
         const formattedMetadata = pattern.formatMetadata
           ? pattern.formatMetadata(metadata)
           : "Video metadata unavailable";
 
         if (VERBOSE) {
-          notifyMsg = await bot.sendMessage(
-            msg.chat.id,
-            `Downloading\n${formattedMetadata}`
-          );
+          notifyMsg = await ctx.reply(`Downloading\n${formattedMetadata}`);
         }
 
-        const stream = await execStreamWithLogging(msg, downloadArgs);
+        const stream = await execStreamWithLogging(ctx, downloadArgs);
 
-        const tempFilePath = join(tmpdir(), `download-${Date.now()}.mp4`);
-        console.log(
-          formatLog(msg, `Writing to temporary file: ${tempFilePath}`)
+        console.log(formatLog(ctx, "Starting video upload..."));
+
+        // Set up error handler for the stream
+        stream.on("error", (error) => {
+          console.error(formatLog(ctx, `Stream error: ${error}`));
+          if (VERBOSE) {
+            ctx.reply("Error while processing the video stream.");
+          }
+        });
+
+        // Send the video directly from the stream
+        await ctx.replyWithVideo(
+          { source: stream, filename: `video-${Date.now()}.mp4` },
+          {
+            caption: formattedMetadata,
+            reply_to_message_id: ctx.message.message_id,
+          } as any
         );
 
-        const fileStream = createWriteStream(tempFilePath);
-        stream.pipe(fileStream);
-
-        fileStream.on("finish", async () => {
-          console.log(formatLog(msg, `Download completed, sending video`));
-
-          await bot.sendVideo(msg.chat.id, tempFilePath, {
-            caption: `${formattedMetadata}`,
-            reply_to_message_id: msg.message_id,
-          });
-
-          if (VERBOSE && notifyMsg) {
-            bot.deleteMessage(msg.chat.id, notifyMsg.message_id);
-          }
-
-          unlink(tempFilePath, (err) => {
-            if (err) {
-              console.error(formatLog(msg, `Error deleting file: ${err}`));
-            } else {
-              console.log(
-                formatLog(msg, `Temporary file deleted: ${tempFilePath}`)
-              );
-            }
-          });
-        });
-      } catch (error: any) {
-        if (VERBOSE) {
-          await bot.sendMessage(msg.chat.id, `Error processing your request.`);
+        if (VERBOSE && notifyMsg) {
+          await ctx.deleteMessage(notifyMsg.message_id);
         }
 
-        console.error(formatLog(msg, `Error: ${error}`));
+        console.log(formatLog(ctx, "Video upload completed"));
+      } catch (error: any) {
+        if (VERBOSE) {
+          await ctx.reply("Error processing your request.");
+        }
+
+        console.error(formatLog(ctx, `Error: ${error}`));
       }
       break;
     }
   }
 });
+
+bot.launch().catch((err) => {
+  console.error("Error starting bot:", err);
+  process.exit(1);
+});
+
+process.once("SIGINT", () => bot.stop("SIGINT"));
+process.once("SIGTERM", () => bot.stop("SIGTERM"));
