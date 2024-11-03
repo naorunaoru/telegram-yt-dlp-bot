@@ -13,6 +13,7 @@ dotenv.config();
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const VERBOSE = process.env.VERBOSE === "true";
 const TEMP_DIR = "./temp";
+const MAX_MEDIA_GROUP = 10;
 
 if (!TOKEN) {
   console.error(
@@ -34,19 +35,25 @@ const formatLog = (ctx: any, text?: string) => {
 const bot = new Telegraf(TOKEN);
 const ytDlpWrap = new YTDlpWrap("./yt-dlp");
 
+interface VideoDownloadResult {
+  path: string;
+  metadata: string | undefined;
+}
+
 const downloadVideo = async (
   ctx: any,
   url: string,
   flags: string[]
 ): Promise<string> => {
-  const outputPath = path.join(TEMP_DIR, `video-${Date.now()}.mp4`);
+  const outputPath = path.join(
+    TEMP_DIR,
+    `video-${Date.now()}-${Math.random().toString(36).substring(7)}.mp4`
+  );
 
   return new Promise((resolve, reject) => {
     console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
 
     const download = ytDlpWrap.exec([url, "-o", outputPath, ...flags]);
-
-    let messageId: number | undefined;
 
     let lastLog = 0;
 
@@ -77,10 +84,59 @@ const downloadVideo = async (
 
     download.on("close", () => {
       console.log(formatLog(ctx, "Download completed"));
-      if (messageId) {
-        ctx.deleteMessage(messageId).catch(() => {});
-      }
       resolve(outputPath);
+    });
+  });
+};
+
+const findAllMatches = (text: string) => {
+  const matches: { url: string; pattern: (typeof patterns)[0] }[] = [];
+
+  for (const pattern of patterns) {
+    const regexMatches = text.matchAll(pattern.regex);
+    for (const match of regexMatches) {
+      matches.push({ url: match[0], pattern });
+    }
+  }
+
+  return matches.slice(0, MAX_MEDIA_GROUP);
+};
+
+const processVideo = async (
+  ctx: any,
+  url: string,
+  pattern: (typeof patterns)[0]
+): Promise<VideoDownloadResult> => {
+  const metadata = await ytDlpWrap.getVideoInfo([
+    url,
+    "-f",
+    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+    ...pattern.flags,
+  ]);
+
+  const formattedMetadata = truncateWithEllipsis(
+    pattern.formatMetadata ? pattern.formatMetadata(metadata) : undefined,
+    {
+      maxLength: 250,
+      ellipsis: " ...",
+      preserveWords: true,
+    }
+  );
+
+  const videoPath = await downloadVideo(ctx, url, pattern.flags);
+
+  return {
+    path: videoPath,
+    metadata: formattedMetadata,
+  };
+};
+
+const cleanupFiles = (files: string[]) => {
+  files.forEach((file) => {
+    fs.unlink(file, (err) => {
+      if (err) {
+        console.error(`Error deleting temp file ${file}: ${err}`);
+      }
     });
   });
 };
@@ -89,57 +145,83 @@ bot.on(message("text"), async (ctx) => {
   const messageText = ctx.message.text;
   if (!messageText) return;
 
-  for (const pattern of patterns) {
-    const match = messageText.match(pattern.regex);
+  const matches = findAllMatches(messageText);
+  if (matches.length === 0) return;
 
-    if (match) {
-      const url = match[0];
-      console.log(formatLog(ctx, `Matched regex for URL: ${url}`));
+  try {
+    if (matches.length === 1) {
+      const { url, pattern } = matches[0];
+      console.log(formatLog(ctx, `Processing single video from URL: ${url}`));
 
-      try {
-        console.log(formatLog(ctx, `Fetching metadata for URL: ${url}`));
+      const { path: videoPath, metadata } = await processVideo(
+        ctx,
+        url,
+        pattern
+      );
 
-        const metadata = await ytDlpWrap.getVideoInfo([
-          url,
-          "-f",
-          "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
-          ...pattern.flags,
-        ]);
+      await ctx.replyWithVideo({ source: fs.createReadStream(videoPath) }, {
+        caption: metadata,
+        reply_to_message_id: ctx.message.message_id,
+      } as any);
 
-        const formattedMetadata = truncateWithEllipsis(
-          pattern.formatMetadata ? pattern.formatMetadata(metadata) : undefined,
-          {
-            maxLength: 250,
-            ellipsis: " ...",
-            preserveWords: true,
-          }
+      cleanupFiles([videoPath]);
+    } else {
+      console.log(formatLog(ctx, `Processing ${matches.length} videos`));
+
+      if (VERBOSE) {
+        await ctx.reply(`Processing ${matches.length} videos...`);
+      }
+
+      const results = await Promise.allSettled(
+        matches.map(({ url, pattern }) => processVideo(ctx, url, pattern))
+      );
+
+      const successfulDownloads = results
+        .map((result, index) => ({
+          result,
+          url: matches[index].url,
+        }))
+        .filter(
+          (
+            item
+          ): item is {
+            result: PromiseFulfilledResult<VideoDownloadResult>;
+            url: string;
+          } => item.result.status === "fulfilled"
         );
 
-        const videoPath = await downloadVideo(ctx, url, pattern.flags);
+      if (successfulDownloads.length > 0) {
+        const mediaGroup = successfulDownloads.map(({ result }) => ({
+          type: "video",
+          media: { source: fs.createReadStream(result.value.path) },
+        }));
 
-        console.log(formatLog(ctx, "Starting video upload..."));
+        await ctx.replyWithMediaGroup(
+          mediaGroup as any,
+          {
+            reply_to_message_id: ctx.message.message_id,
+          } as any
+        );
 
-        await ctx.replyWithVideo({ source: fs.createReadStream(videoPath) }, {
-          caption: formattedMetadata,
-          reply_to_message_id: ctx.message.message_id,
-        } as any);
-
-        fs.unlink(videoPath, (err) => {
-          if (err) {
-            console.error(formatLog(ctx, `Error deleting temp file: ${err}`));
-          }
-        });
-
-        console.log(formatLog(ctx, "Video upload completed"));
-      } catch (error: any) {
-        if (VERBOSE) {
-          await ctx.reply("Error processing your request.");
-        }
-
-        console.error(formatLog(ctx, `Error: ${error}`));
+        cleanupFiles(
+          successfulDownloads.map(({ result }) => result.value.path)
+        );
       }
-      break;
+
+      const failedDownloads = results.filter(
+        (result) => result.status === "rejected"
+      );
+      if (failedDownloads.length > 0 && VERBOSE) {
+        await ctx.reply(
+          `Failed to process ${failedDownloads.length} video(s).`
+        );
+      }
     }
+  } catch (error: any) {
+    if (VERBOSE) {
+      await ctx.reply("Error processing your request.");
+    }
+    console.error(formatLog(ctx, `Error: ${error}`));
   }
 });
 
