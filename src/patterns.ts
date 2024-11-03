@@ -32,8 +32,7 @@ const redditPattern: PatternConfig = {
 };
 
 const twitterPattern: PatternConfig = {
-  regex:
-    /https?:\/\/(?:(?:www|m(?:obile)?)\.)?(?:(?:twitter|x)\.com|twitter3e4tixl4xyajtrzo62zg5vztmjuricljdp2c5kshju4avyoid\.onion)\//i,
+  regex: /https?:\/\/((?:twitter|x)\.com)\/[a-zA-Z0-9_]+\/status\/\d+/i,
   flags: [],
   formatMetadata: (metadata) =>
     metadata.title ? `Tweet: ${metadata.title}` : undefined,

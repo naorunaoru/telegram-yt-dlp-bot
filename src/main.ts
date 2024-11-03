@@ -48,14 +48,21 @@ const downloadVideo = async (
 
     let messageId: number | undefined;
 
+    let lastLog = 0;
+
     download.on("progress", async (progress) => {
-      console.log(
-        formatLog(ctx),
-        progress.percent,
-        progress.totalSize,
-        progress.currentSpeed,
-        progress.eta
-      );
+      const now = Date.now();
+      if (now - lastLog >= 5000) {
+        console.log(
+          formatLog(ctx),
+          progress.percent,
+          progress.totalSize,
+          progress.currentSpeed,
+          progress.eta
+        );
+
+        lastLog = now;
+      }
     });
 
     download.on("ytDlpEvent", (eventType, eventData) =>
