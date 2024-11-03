@@ -25,7 +25,7 @@ const ytShortsPattern: PatternConfig = {
 
 const redditPattern: PatternConfig = {
   regex:
-    /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?<slug>(?:(?:r|user)\/[^/]+\/)?comments\/(?<id>[^/?#&]+))\//i,
+    /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?:(?:r|user)\/[^/]+\/)?(?:(?:comments\/[^/]+\/[^/]+)|(?:s\/[^/?#&]+))/i,
   flags: [],
   formatMetadata: (metadata) =>
     `Reddit Post: ${metadata.title || "No title available"}`,
