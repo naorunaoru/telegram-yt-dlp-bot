@@ -68,16 +68,13 @@ bot.on(message("text"), async (ctx) => {
 
         console.log(formatLog(ctx, `Fetching metadata for URL: ${url}`));
 
-        const downloadArgs = [
-          url,
-          ...pattern.flags,
-          "-f",
-          "bestvideo*+bestaudio/best",
-          "--recode-video",
-          "mp4",
-        ];
+        const downloadArgs = [url, ...pattern.flags];
 
-        const metadata = await ytDlpWrap.getVideoInfo(downloadArgs);
+        const metadata = await ytDlpWrap.getVideoInfo([
+          ...downloadArgs,
+          "-f",
+          "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+        ]);
 
         const formattedMetadata = pattern.formatMetadata
           ? pattern.formatMetadata(metadata)
@@ -104,10 +101,8 @@ bot.on(message("text"), async (ctx) => {
           { source: stream, filename: `video-${Date.now()}.mp4` },
           {
             caption: formattedMetadata,
-            reply_parameters: {
-              message_id: ctx.message.message_id,
-            },
-          }
+            reply_to_message_id: ctx.message.message_id,
+          } as any
         );
 
         if (VERBOSE && notifyMsg) {
