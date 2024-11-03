@@ -53,7 +53,15 @@ bot.on("message", async (msg) => {
         let notifyMsg: TelegramBot.Message | undefined;
 
         console.log(formatLog(msg, `Fetching metadata for URL: ${url}`));
-        const metadata = await ytDlpWrap.getVideoInfo(url);
+
+        const downloadArgs = [
+          url,
+          ...pattern.flags,
+          "-f",
+          "bestvideo*+bestaudio/best",
+        ];
+
+        const metadata = await ytDlpWrap.getVideoInfo(downloadArgs);
 
         const formattedMetadata = pattern.formatMetadata
           ? pattern.formatMetadata(metadata)
@@ -66,12 +74,6 @@ bot.on("message", async (msg) => {
           );
         }
 
-        const downloadArgs = [
-          url,
-          ...pattern.flags,
-          "-f",
-          "bestvideo*+bestaudio/best",
-        ];
         const stream = await execStreamWithLogging(msg, downloadArgs);
 
         const tempFilePath = join(tmpdir(), `download-${Date.now()}.mp4`);
