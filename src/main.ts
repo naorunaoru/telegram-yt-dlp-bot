@@ -66,7 +66,12 @@ bot.on("message", async (msg) => {
           );
         }
 
-        const downloadArgs = [url, ...pattern.flags];
+        const downloadArgs = [
+          url,
+          ...pattern.flags,
+          "-f",
+          "bestvideo*+bestaudio/best",
+        ];
         const stream = await execStreamWithLogging(msg, downloadArgs);
 
         const tempFilePath = join(tmpdir(), `download-${Date.now()}.mp4`);
