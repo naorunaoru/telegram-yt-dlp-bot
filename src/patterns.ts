@@ -3,7 +3,7 @@ import { PatternConfig } from "./types";
 const tiktokPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:www\.tiktok\.com\/(?:embed\/|@[\w.-]+?\/video\/)|(?:vm|vt)\.tiktok\.com\/|www\.tiktok\.com\/t\/)([\w\d]+)/i,
-  flags: [],
+  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
   formatMetadata: (metadata) =>
     metadata.title ? `TikTok Video: ${metadata.title}` : undefined,
 };
@@ -11,7 +11,7 @@ const tiktokPattern: PatternConfig = {
 const instagramPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:www\.)?(?:dd)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel|stories\/[^\/]+\/\d+)\/[^\/?#&]+/i,
-  flags: [],
+  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
   formatMetadata: (metadata) =>
     metadata.title ? `Instagram Post: ${metadata.title}` : undefined,
 };
@@ -33,7 +33,7 @@ const redditPattern: PatternConfig = {
 
 const twitterPattern: PatternConfig = {
   regex: /https?:\/\/((?:twitter|x)\.com)\/[a-zA-Z0-9_]+\/status\/\d+/i,
-  flags: [],
+  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
   formatMetadata: (metadata) =>
     metadata.title ? `Tweet: ${metadata.title}` : undefined,
 };
