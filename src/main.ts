@@ -40,7 +40,14 @@ interface VideoDownloadResult {
   metadata: string | undefined;
 }
 
-const DEFAULT_FLAGS = ["-f", "bv*+ba/b", "--recode-video", "mp4"];
+const DEFAULT_FLAGS = [
+  "-f",
+  "bv*+ba/b",
+  "-S",
+  "res:720,+vcodec:avc",
+  "--recode-video",
+  "mp4",
+];
 
 const downloadVideo = async (
   ctx: any,

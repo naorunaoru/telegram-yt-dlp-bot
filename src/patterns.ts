@@ -11,14 +11,14 @@ const tiktokPattern: PatternConfig = {
 const instagramPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:www\.)?(?:dd)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel|stories\/[^\/]+\/\d+)\/[^\/?#&]+/gi,
-  flags: [],
+  flags: ["-S", "acodec:opus"],
   formatMetadata: (metadata) =>
     metadata.title ? `Instagram Post: ${metadata.title}` : undefined,
 };
 
 const ytShortsPattern: PatternConfig = {
   regex: /https?:\/\/(?:www\.)?youtube\.com(?:\/)(shorts\/[^\/?#&]+)+/gi,
-  flags: [],
+  flags: ["-S", "acodec:opus"],
   formatMetadata: (metadata) =>
     metadata.title ? `Youtube Short: ${metadata.title}` : undefined,
 };
