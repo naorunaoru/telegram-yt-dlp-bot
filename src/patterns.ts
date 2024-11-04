@@ -3,7 +3,7 @@ import { PatternConfig } from "./types";
 const tiktokPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:www\.tiktok\.com\/(?:embed\/|@[\w.-]+?\/video\/)|(?:vm|vt)\.tiktok\.com\/|www\.tiktok\.com\/t\/)([\w\d]+)/gi,
-  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
+  flags: [],
   formatMetadata: (metadata) =>
     metadata.title ? `TikTok Video: ${metadata.title}` : undefined,
 };
@@ -11,14 +11,14 @@ const tiktokPattern: PatternConfig = {
 const instagramPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:www\.)?(?:dd)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel|stories\/[^\/]+\/\d+)\/[^\/?#&]+/gi,
-  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
+  flags: [],
   formatMetadata: (metadata) =>
     metadata.title ? `Instagram Post: ${metadata.title}` : undefined,
 };
 
 const ytShortsPattern: PatternConfig = {
   regex: /https?:\/\/(?:www\.)?youtube\.com(?:\/)(shorts\/[^\/?#&]+)+/gi,
-  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
+  flags: [],
   formatMetadata: (metadata) =>
     metadata.title ? `Youtube Short: ${metadata.title}` : undefined,
 };
@@ -26,14 +26,14 @@ const ytShortsPattern: PatternConfig = {
 const redditPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?:(?:r|user)\/[^/]+\/)?(?:(?:comments\/[^/]+\/[^/]+)|(?:s\/[^/?#&]+))/gi,
-  flags: ["-f", "(bv*+ba/b)[protocol^=http][protocol!*=dash]"],
+  flags: [],
   formatMetadata: (metadata) =>
     metadata.title ? `Reddit Post: ${metadata.title}` : undefined,
 };
 
 const twitterPattern: PatternConfig = {
   regex: /https?:\/\/((?:twitter|x)\.com)\/[a-zA-Z0-9_]+\/status\/\d+/gi,
-  flags: ["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]"],
+  flags: [],
   formatMetadata: (metadata) =>
     metadata.title ? `Tweet: ${metadata.title}` : undefined,
 };

@@ -40,6 +40,8 @@ interface VideoDownloadResult {
   metadata: string | undefined;
 }
 
+const DEFAULT_FLAGS = ["-f", "bv*+ba/b", "--recode-video", "mp4"];
+
 const downloadVideo = async (
   ctx: any,
   url: string,
@@ -47,13 +49,24 @@ const downloadVideo = async (
 ): Promise<string> => {
   const outputPath = path.join(
     TEMP_DIR,
-    `video-${Date.now()}-${Math.random().toString(36).substring(7)}.mp4`
+    `video-${Date.now()}-${Math.random().toString(36).substring(7)}`
   );
+
+  let actualOutputPath: string;
 
   return new Promise((resolve, reject) => {
     console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
 
-    const download = ytDlpWrap.exec([url, "-o", outputPath, ...flags]);
+    const download = ytDlpWrap.exec([
+      url,
+      "-o",
+      outputPath,
+      "--print",
+      "after_move:[filename] %(filepath)s",
+      "--no-quiet",
+      ...DEFAULT_FLAGS,
+      ...flags,
+    ]);
 
     let lastLog = 0;
 
@@ -72,9 +85,13 @@ const downloadVideo = async (
       }
     });
 
-    download.on("ytDlpEvent", (eventType, eventData) =>
-      console.log(formatLog(ctx), eventType, eventData)
-    );
+    download.on("ytDlpEvent", (eventType, eventData) => {
+      console.log(formatLog(ctx), eventType, eventData);
+
+      if (eventType === "filename") {
+        actualOutputPath = eventData.trim();
+      }
+    });
 
     download.on("error", (error) => {
       console.error(formatLog(ctx, `Download error: ${error}`));
@@ -84,7 +101,7 @@ const downloadVideo = async (
 
     download.on("close", () => {
       console.log(formatLog(ctx, "Download completed"));
-      resolve(outputPath);
+      resolve(actualOutputPath);
     });
   });
 };
@@ -109,8 +126,7 @@ const processVideo = async (
 ): Promise<VideoDownloadResult> => {
   const metadata = await ytDlpWrap.getVideoInfo([
     url,
-    "-f",
-    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+    ...DEFAULT_FLAGS,
     ...pattern.flags,
   ]);
 
