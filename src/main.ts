@@ -11,7 +11,7 @@ import { truncateWithEllipsis } from "./helpers/text";
 dotenv.config();
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const VERBOSE = process.env.VERBOSE === "true";
+const VERBOSE_GROUPS = process.env.VERBOSE_GROUPS === "true";
 const TEMP_DIR = "./temp";
 const MAX_MEDIA_GROUP = 10;
 
@@ -32,22 +32,21 @@ const formatLog = (ctx: any, text?: string) => {
   return `[User: ${userId}, Chat: ${chatId}] ${text ? text : ""}`;
 };
 
+const isPrivateChat = (ctx: any): boolean => {
+  return ctx.chat?.type === "private";
+};
+
+const isVerbose = (ctx: any): boolean => {
+  return isPrivateChat(ctx) || VERBOSE_GROUPS;
+};
+
 const bot = new Telegraf(TOKEN);
 const ytDlpWrap = new YTDlpWrap("./yt-dlp");
 
 interface VideoDownloadResult {
   path: string;
-  metadata: string | undefined;
+  metadata: any;
 }
-
-const DEFAULT_FLAGS = [
-  "-f",
-  "bv*+ba/b",
-  "-S",
-  "res:720,+vcodec:avc",
-  "--recode-video",
-  "mp4",
-];
 
 const downloadVideo = async (
   ctx: any,
@@ -71,26 +70,10 @@ const downloadVideo = async (
       "--print",
       "after_move:[filename] %(filepath)s",
       "--no-quiet",
-      ...DEFAULT_FLAGS,
+      "--merge-output-format",
+      "mp4",
       ...flags,
     ]);
-
-    let lastLog = 0;
-
-    download.on("progress", async (progress) => {
-      const now = Date.now();
-      if (now - lastLog >= 5000) {
-        console.log(
-          formatLog(ctx),
-          progress.percent,
-          progress.totalSize,
-          progress.currentSpeed,
-          progress.eta
-        );
-
-        lastLog = now;
-      }
-    });
 
     download.on("ytDlpEvent", (eventType, eventData) => {
       console.log(formatLog(ctx), eventType, eventData);
@@ -102,6 +85,7 @@ const downloadVideo = async (
 
     download.on("error", (error) => {
       console.error(formatLog(ctx, `Download error: ${error}`));
+
       fs.unlink(outputPath, () => {});
       reject(error);
     });
@@ -131,13 +115,18 @@ const processVideo = async (
   url: string,
   pattern: (typeof patterns)[0]
 ): Promise<VideoDownloadResult> => {
-  const metadata = await ytDlpWrap.getVideoInfo([
-    url,
-    ...DEFAULT_FLAGS,
-    ...pattern.flags,
-  ]);
+  const metadata = await ytDlpWrap.getVideoInfo([url, ...pattern.flags]);
 
-  const formattedMetadata = truncateWithEllipsis(
+  const videoPath = await downloadVideo(ctx, url, pattern.flags);
+
+  return {
+    path: videoPath,
+    metadata,
+  };
+};
+
+const formatMetadata = (metadata: any, pattern: (typeof patterns)[0]) =>
+  truncateWithEllipsis(
     pattern.formatMetadata ? pattern.formatMetadata(metadata) : undefined,
     {
       maxLength: 250,
@@ -145,14 +134,6 @@ const processVideo = async (
       preserveWords: true,
     }
   );
-
-  const videoPath = await downloadVideo(ctx, url, pattern.flags);
-
-  return {
-    path: videoPath,
-    metadata: formattedMetadata,
-  };
-};
 
 const cleanupFiles = (files: string[]) => {
   files.forEach((file) => {
@@ -182,16 +163,24 @@ bot.on(message("text"), async (ctx) => {
         pattern
       );
 
-      await ctx.replyWithVideo({ source: fs.createReadStream(videoPath) }, {
-        caption: metadata,
-        reply_to_message_id: ctx.message.message_id,
-      } as any);
+      await ctx.replyWithVideo(
+        { source: fs.createReadStream(videoPath) },
+        {
+          caption: formatMetadata(metadata, pattern),
+          reply_parameters: {
+            message_id: ctx.message.message_id,
+          },
+          supports_streaming: true,
+          width: metadata.width,
+          height: metadata.height,
+        }
+      );
 
       cleanupFiles([videoPath]);
     } else {
       console.log(formatLog(ctx, `Processing ${matches.length} videos`));
 
-      if (VERBOSE) {
+      if (isVerbose(ctx)) {
         await ctx.reply(`Processing ${matches.length} videos...`);
       }
 
@@ -233,25 +222,51 @@ bot.on(message("text"), async (ctx) => {
 
       const failedDownloads = results.filter(
         (result) => result.status === "rejected"
-      );
-      if (failedDownloads.length > 0 && VERBOSE) {
-        await ctx.reply(
-          `Failed to process ${failedDownloads.length} video(s).`
-        );
+      ) as PromiseRejectedResult[];
+
+      if (failedDownloads.length > 0) {
+        if (isPrivateChat(ctx)) {
+          const errorMessages = failedDownloads
+            .map((result, index) => {
+              const error = result.reason;
+              const errorMsg = error.message || String(error);
+              return `${index + 1}. ${matches[index].url}: ${errorMsg.substring(
+                0,
+                100
+              )}`;
+            })
+            .join("\n");
+
+          await ctx.reply(
+            `Failed to process ${failedDownloads.length} video(s):\n${errorMessages}`
+          );
+        } else if (VERBOSE_GROUPS) {
+          await ctx.reply(
+            `Failed to process ${failedDownloads.length} video(s).`
+          );
+        }
       }
     }
   } catch (error: any) {
-    if (VERBOSE) {
+    console.error(formatLog(ctx, `Error: ${error}`));
+
+    if (isPrivateChat(ctx)) {
+      const errorMessage = error.message || String(error);
+      await ctx.reply(`Error processing your request: ${errorMessage}`);
+    } else if (VERBOSE_GROUPS) {
       await ctx.reply("Error processing your request.");
     }
-    console.error(formatLog(ctx, `Error: ${error}`));
   }
 });
 
-bot.launch().catch((err) => {
-  console.error("Error starting bot:", err);
-  process.exit(1);
-});
+const initializeBot = async () => {
+  await bot.launch().catch((err) => {
+    console.error("Error starting bot:", err);
+    process.exit(1);
+  });
+};
+
+initializeBot();
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));

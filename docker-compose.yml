@@ -3,3 +3,18 @@ services:
     build: .
     env_file:
       - .env
+    # Uncomment for VAAPI devices
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # Uncomment for NVIDIA GPUs
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [compute, utility, video]
+    environment:
+      - HW_ACCEL=none
+      - MAX_RESOLUTION=720
+      - VERBOSE_GROUPS=false
