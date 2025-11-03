@@ -5,7 +5,7 @@ RUN echo "https://dl-cdn.alpinelinux.org/alpine/v$(cut -d'.' -f1,2 /etc/alpine-r
 RUN apk update
 
 # Install base dependencies and hardware acceleration libraries
-RUN apk add --no-cache python3 py3-pip make g++ ffmpeg \
+RUN apk add --no-cache python3 py3-pip make g++ ffmpeg dcron \
     # VAAPI support
     libva libva-utils
 
@@ -13,8 +13,11 @@ WORKDIR /usr/src/app
 
 COPY . .
 
-RUN npm install && npm run build && npm run download
+RUN npm install && npm run build && pip install --break-system-packages "yt-dlp[default]"
+
+# Make scripts executable
+RUN chmod +x /usr/src/app/docker-entrypoint.sh /usr/src/app/scripts/update-ytdlp.sh
 
 EXPOSE 8081/tcp 8082/tcp
 
-CMD ["npm", "start"]
+ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]

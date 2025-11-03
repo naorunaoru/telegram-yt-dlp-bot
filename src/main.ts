@@ -1,5 +1,5 @@
-import { Telegraf } from "telegraf";
-import YTDlpWrap from "yt-dlp-wrap";
+import { Telegraf, Context } from "telegraf";
+import { execYtDlp, getVideoInfo } from "./ytdlp";
 import dotenv from "dotenv";
 import { message } from "telegraf/filters";
 import fs from "fs";
@@ -7,6 +7,7 @@ import path from "path";
 
 import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
+import { VideoMetadata } from "./types";
 
 dotenv.config();
 
@@ -26,30 +27,29 @@ if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR);
 }
 
-const formatLog = (ctx: any, text?: string) => {
+const formatLog = (ctx: Context, text?: string) => {
   const userId = ctx.from?.id;
   const chatId = ctx.chat?.id;
   return `[User: ${userId}, Chat: ${chatId}] ${text ? text : ""}`;
 };
 
-const isPrivateChat = (ctx: any): boolean => {
+const isPrivateChat = (ctx: Context): boolean => {
   return ctx.chat?.type === "private";
 };
 
-const isVerbose = (ctx: any): boolean => {
+const isVerbose = (ctx: Context): boolean => {
   return isPrivateChat(ctx) || VERBOSE_GROUPS;
 };
 
 const bot = new Telegraf(TOKEN);
-const ytDlpWrap = new YTDlpWrap("./yt-dlp");
 
 interface VideoDownloadResult {
   path: string;
-  metadata: any;
+  metadata: VideoMetadata;
 }
 
 const downloadVideo = async (
-  ctx: any,
+  ctx: Context,
   url: string,
   flags: string[]
 ): Promise<string> => {
@@ -58,12 +58,12 @@ const downloadVideo = async (
     `video-${Date.now()}-${Math.random().toString(36).substring(7)}`
   );
 
-  let actualOutputPath: string;
+  let actualOutputPath: string | undefined;
 
   return new Promise((resolve, reject) => {
     console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
 
-    const download = ytDlpWrap.exec([
+    const download = execYtDlp([
       url,
       "-o",
       outputPath,
@@ -86,11 +86,17 @@ const downloadVideo = async (
     download.on("error", (error) => {
       console.error(formatLog(ctx, `Download error: ${error}`));
 
-      fs.unlink(outputPath, () => {});
+      fs.unlink(outputPath, (err) => {
+        if (err) console.error(formatLog(ctx, `Cleanup failed: ${err}`));
+      });
       reject(error);
     });
 
     download.on("close", () => {
+      if (!actualOutputPath) {
+        reject(new Error("Failed to get output path from yt-dlp"));
+        return;
+      }
       console.log(formatLog(ctx, "Download completed"));
       resolve(actualOutputPath);
     });
@@ -111,11 +117,11 @@ const findAllMatches = (text: string) => {
 };
 
 const processVideo = async (
-  ctx: any,
+  ctx: Context,
   url: string,
   pattern: (typeof patterns)[0]
 ): Promise<VideoDownloadResult> => {
-  const metadata = await ytDlpWrap.getVideoInfo([url, ...pattern.flags]);
+  const metadata = await getVideoInfo([url, ...pattern.flags]);
 
   const videoPath = await downloadVideo(ctx, url, pattern.flags);
 
@@ -125,9 +131,13 @@ const processVideo = async (
   };
 };
 
-const formatMetadata = (metadata: any, pattern: (typeof patterns)[0]) =>
+const formatMetadata = (
+  metadata: VideoMetadata,
+  pattern: (typeof patterns)[0],
+  url: string
+) =>
   truncateWithEllipsis(
-    pattern.formatMetadata ? pattern.formatMetadata(metadata) : undefined,
+    pattern.formatMetadata ? pattern.formatMetadata(metadata, url) : undefined,
     {
       maxLength: 250,
       ellipsis: " ...",
@@ -166,7 +176,7 @@ bot.on(message("text"), async (ctx) => {
       await ctx.replyWithVideo(
         { source: fs.createReadStream(videoPath) },
         {
-          caption: formatMetadata(metadata, pattern),
+          caption: formatMetadata(metadata, pattern, url),
           reply_parameters: {
             message_id: ctx.message.message_id,
           },
@@ -192,6 +202,7 @@ bot.on(message("text"), async (ctx) => {
         .map((result, index) => ({
           result,
           url: matches[index].url,
+          pattern: matches[index].pattern,
         }))
         .filter(
           (
@@ -199,41 +210,42 @@ bot.on(message("text"), async (ctx) => {
           ): item is {
             result: PromiseFulfilledResult<VideoDownloadResult>;
             url: string;
+            pattern: (typeof patterns)[0];
           } => item.result.status === "fulfilled"
         );
 
       if (successfulDownloads.length > 0) {
-        const mediaGroup = successfulDownloads.map(({ result }) => ({
-          type: "video",
+        const mediaGroup = successfulDownloads.map(({ result, url, pattern }) => ({
+          type: "video" as const,
           media: { source: fs.createReadStream(result.value.path) },
+          caption: formatMetadata(result.value.metadata, pattern, url),
         }));
 
-        await ctx.replyWithMediaGroup(
-          mediaGroup as any,
-          {
-            reply_to_message_id: ctx.message.message_id,
-          } as any
-        );
+        await ctx.replyWithMediaGroup(mediaGroup, {
+          reply_parameters: {
+            message_id: ctx.message.message_id,
+          },
+        });
 
         cleanupFiles(
           successfulDownloads.map(({ result }) => result.value.path)
         );
       }
 
-      const failedDownloads = results.filter(
-        (result) => result.status === "rejected"
-      ) as PromiseRejectedResult[];
+      const failedDownloads = results
+        .map((result, index) => ({ result, index }))
+        .filter(
+          (item): item is { result: PromiseRejectedResult; index: number } =>
+            item.result.status === "rejected"
+        );
 
       if (failedDownloads.length > 0) {
         if (isPrivateChat(ctx)) {
           const errorMessages = failedDownloads
-            .map((result, index) => {
+            .map(({ result, index }) => {
               const error = result.reason;
               const errorMsg = error.message || String(error);
-              return `${index + 1}. ${matches[index].url}: ${errorMsg.substring(
-                0,
-                100
-              )}`;
+              return `${matches[index].url}: ${errorMsg.substring(0, 100)}`;
             })
             .join("\n");
 
@@ -252,7 +264,9 @@ bot.on(message("text"), async (ctx) => {
 
     if (isPrivateChat(ctx)) {
       const errorMessage = error.message || String(error);
-      await ctx.reply(`Error processing your request: ${errorMessage}`);
+      await ctx.reply(`Error processing your request:\n\`\`\`\n${errorMessage}\n\`\`\``, {
+        parse_mode: "Markdown",
+      });
     } else if (VERBOSE_GROUPS) {
       await ctx.reply("Error processing your request.");
     }
@@ -264,6 +278,8 @@ const initializeBot = async () => {
     console.error("Error starting bot:", err);
     process.exit(1);
   });
+
+  console.log("Bot is running!");
 };
 
 initializeBot();

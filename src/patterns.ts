@@ -7,8 +7,8 @@ const tiktokPattern: PatternConfig = {
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
   ],
-  formatMetadata: (metadata) =>
-    metadata.title ? `TikTok Video: ${metadata.title}` : undefined,
+  formatMetadata: (metadata, url) =>
+    metadata.title ? `${metadata.title}\n\n${url}` : undefined,
 };
 
 const instagramPattern: PatternConfig = {
@@ -18,8 +18,8 @@ const instagramPattern: PatternConfig = {
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
   ],
-  formatMetadata: (metadata) =>
-    metadata.title ? `Instagram Post: ${metadata.title}` : undefined,
+  formatMetadata: (metadata, url) =>
+    metadata.title ? `${metadata.title}\n\n${url}` : undefined,
 };
 
 const ytShortsPattern: PatternConfig = {
@@ -28,19 +28,22 @@ const ytShortsPattern: PatternConfig = {
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
   ],
-  formatMetadata: (metadata) =>
-    metadata.title ? `Youtube Short: ${metadata.title}` : undefined,
+  formatMetadata: (metadata, url) =>
+    metadata.title ? `${metadata.title}\n\n${url}` : undefined,
 };
 
 const youtubePattern: PatternConfig = {
   regex:
     /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|v\/)|youtu\.be\/|youtube\.googleapis\.com\/v\/)([0-9A-Za-z_-]{11})(?:[?&].*)?/gi,
   flags: [
+    "--embed-thumbnail",
+    "--convert-thumbnails",
+    "jpg",
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
   ],
-  formatMetadata: (metadata) =>
-    metadata.title ? `YouTube Video: ${metadata.title}` : undefined,
+  formatMetadata: (metadata, url) =>
+    metadata.title ? `${metadata.title}\n\n${url}` : undefined,
 };
 
 const redditPattern: PatternConfig = {
@@ -51,8 +54,8 @@ const redditPattern: PatternConfig = {
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])']+ba) / (bv*+ba/b)",
   ],
-  formatMetadata: (metadata) =>
-    metadata.title ? `Reddit Post: ${metadata.title}` : undefined,
+  formatMetadata: (metadata, url) =>
+    metadata.title ? `${metadata.title}\n\n${url}` : undefined,
 };
 
 const twitterPattern: PatternConfig = {
@@ -61,8 +64,8 @@ const twitterPattern: PatternConfig = {
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
   ],
-  formatMetadata: (metadata) =>
-    metadata.title ? `Tweet: ${metadata.title}` : undefined,
+  formatMetadata: (metadata, url) =>
+    metadata.title ? `${metadata.title}\n\n${url}` : undefined,
 };
 
 export const patterns = [
