@@ -85,9 +85,9 @@ describe("Instagram patterns", () => {
     expect(findMatch("https://www.instagram.com/someuser/reel/AbCdEfGhIjK/")).not.toBeNull();
   });
 
-  // Known issue: stories regex requires a trailing path segment that doesn't exist
-  // The regex expects /<type>/<id> but stories URLs are /stories/<user>/<id>/ with nothing after
-  it.todo("matches story URLs — regex needs fix for stories format");
+  it("matches story URLs", () => {
+    expect(findMatch("https://www.instagram.com/stories/username/1234567890/")).not.toBeNull();
+  });
 });
 
 describe("YouTube Shorts patterns", () => {
