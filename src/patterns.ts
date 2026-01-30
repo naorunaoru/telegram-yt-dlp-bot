@@ -13,7 +13,7 @@ const tiktokPattern: PatternConfig = {
 
 const instagramPattern: PatternConfig = {
   regex:
-    /https?:\/\/(?:www\.)?(?:dd)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel|stories\/[^\/]+\/\d+)\/[^\/?#&]+/gi,
+    /https?:\/\/(?:www\.)?(?:dd)?instagram\.com(?:\/[^\/]+)?\/(p|tv|reel(s)?|stories\/[^\/]+\/\d+)\/[^\/?#&]+/gi,
   flags: [
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
