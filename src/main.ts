@@ -116,6 +116,7 @@ const findAllMatches = (text: string) => {
   const matches: { url: string; pattern: (typeof patterns)[0] }[] = [];
 
   for (const pattern of patterns) {
+    pattern.regex.lastIndex = 0;
     const regexMatches = text.matchAll(pattern.regex);
     for (const match of regexMatches) {
       matches.push({ url: match[0], pattern });
