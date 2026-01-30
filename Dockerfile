@@ -15,9 +15,8 @@ COPY . .
 
 RUN npm install && npm run build && pip install --break-system-packages "yt-dlp[default]"
 
-# Configure yt-dlp to use Node.js (already in container) as its JS runtime
-# Required for YouTube extraction (EJS challenge solving)
-RUN mkdir -p /etc/yt-dlp && echo "--js-runtimes node" > /etc/yt-dlp/config
+# yt-dlp configuration
+COPY yt-dlp.conf /etc/yt-dlp/config
 
 # Make scripts executable
 RUN chmod +x /usr/src/app/docker-entrypoint.sh /usr/src/app/scripts/update-ytdlp.sh
