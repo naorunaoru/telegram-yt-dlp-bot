@@ -5,14 +5,18 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "test": "vitest run"
   },
   "author": "@naoru",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.5",
-    "telegraf": "^4.16.3",
-    "ts-node": "^10.9.2"
+    "telegraf": "^4.16.3"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
 }
