@@ -1,5 +1,5 @@
 import { Telegraf, Context } from "telegraf";
-import { execYtDlp, getVideoInfo } from "./ytdlp";
+import { execYtDlp } from "./ytdlp";
 import dotenv from "dotenv";
 import { message } from "telegraf/filters";
 import fs from "fs";
@@ -53,13 +53,14 @@ const downloadVideo = async (
   ctx: Context,
   url: string,
   flags: string[]
-): Promise<string> => {
+): Promise<VideoDownloadResult> => {
   const outputPath = path.join(
     TEMP_DIR,
     `video-${Date.now()}-${Math.random().toString(36).substring(7)}`
   );
 
   let actualOutputPath: string | undefined;
+  let metadata: VideoMetadata = {};
 
   return new Promise((resolve, reject) => {
     console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
@@ -68,6 +69,8 @@ const downloadVideo = async (
       url,
       "-o",
       outputPath,
+      "--print",
+      "before_dl:[metadata] %()j",
       "--print",
       "after_move:[filename] %(filepath)s",
       "--no-quiet",
@@ -87,6 +90,12 @@ const downloadVideo = async (
 
       if (eventType === "filename") {
         actualOutputPath = eventData.trim();
+      } else if (eventType === "metadata") {
+        try {
+          metadata = JSON.parse(eventData);
+        } catch (err) {
+          console.error(formatLog(ctx, `Failed to parse metadata: ${err}`));
+        }
       }
     });
 
@@ -107,7 +116,7 @@ const downloadVideo = async (
         return;
       }
       console.log(formatLog(ctx, "Download completed"));
-      resolve(actualOutputPath);
+      resolve({ path: actualOutputPath, metadata });
     });
   });
 };
@@ -126,19 +135,12 @@ const findAllMatches = (text: string) => {
   return matches.slice(0, MAX_MEDIA_GROUP);
 };
 
-const processVideo = async (
+const processVideo = (
   ctx: Context,
   url: string,
   pattern: (typeof patterns)[0]
 ): Promise<VideoDownloadResult> => {
-  const metadata = await getVideoInfo([url, ...pattern.flags]);
-
-  const videoPath = await downloadVideo(ctx, url, pattern.flags);
-
-  return {
-    path: videoPath,
-    metadata,
-  };
+  return downloadVideo(ctx, url, pattern.flags);
 };
 
 const formatMetadata = (

@@ -1,6 +1,5 @@
 import { spawn } from "child_process";
 import { EventEmitter } from "events";
-import { VideoMetadata } from "./types";
 
 /**
  * Event emitter for yt-dlp execution, mimics yt-dlp-wrap's interface
@@ -40,7 +39,17 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
       const filenameMatch = line.match(/^\[filename\]\s+(.+)$/);
       if (filenameMatch) {
         emitter.emit("ytDlpEvent", "filename", filenameMatch[1]);
-      } else if (line.trim()) {
+        continue;
+      }
+
+      // Parse [metadata] marker from --print "before_dl:[metadata] %()j"
+      const metadataMatch = line.match(/^\[metadata\]\s+(.+)$/);
+      if (metadataMatch) {
+        emitter.emit("ytDlpEvent", "metadata", metadataMatch[1]);
+        continue;
+      }
+
+      if (line.trim()) {
         // Emit other output as generic events
         emitter.emit("ytDlpEvent", "stdout", line);
       }
@@ -75,44 +84,4 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
   });
 
   return emitter;
-}
-
-/**
- * Get video info/metadata using yt-dlp --dump-json
- * Returns a promise that resolves to the video metadata
- */
-export function getVideoInfo(args: string[]): Promise<VideoMetadata> {
-  return new Promise((resolve, reject) => {
-    const process = spawn("yt-dlp", ["--dump-json", ...args]);
-
-    let stdout = "";
-    let stderr = "";
-
-    process.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    process.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    process.on("error", (error: Error) => {
-      reject(error);
-    });
-
-    process.on("close", (code: number | null) => {
-      if (code !== 0) {
-        reject(new Error(`yt-dlp exited with code ${code}: ${stderr}`));
-        return;
-      }
-
-      try {
-        // Parse JSON output
-        const metadata = JSON.parse(stdout);
-        resolve(metadata);
-      } catch (error) {
-        reject(new Error(`Failed to parse yt-dlp JSON output: ${error}`));
-      }
-    });
-  });
 }
