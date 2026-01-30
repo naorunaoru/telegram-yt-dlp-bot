@@ -15,6 +15,7 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const VERBOSE_GROUPS = process.env.VERBOSE_GROUPS === "true";
 const TEMP_DIR = "./temp";
 const MAX_MEDIA_GROUP = 10;
+const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 if (!TOKEN) {
   console.error(
@@ -75,6 +76,12 @@ const downloadVideo = async (
       ...flags,
     ]);
 
+    const timeout = setTimeout(() => {
+      console.error(formatLog(ctx, `Download timed out for URL: ${url}`));
+      download.kill("SIGTERM");
+      reject(new Error("Download timed out"));
+    }, DOWNLOAD_TIMEOUT_MS);
+
     download.on("ytDlpEvent", (eventType, eventData) => {
       console.log(formatLog(ctx), eventType, eventData);
 
@@ -84,6 +91,7 @@ const downloadVideo = async (
     });
 
     download.on("error", (error) => {
+      clearTimeout(timeout);
       console.error(formatLog(ctx, `Download error: ${error}`));
 
       fs.unlink(outputPath, (err) => {
@@ -93,6 +101,7 @@ const downloadVideo = async (
     });
 
     download.on("close", () => {
+      clearTimeout(timeout);
       if (!actualOutputPath) {
         reject(new Error("Failed to get output path from yt-dlp"));
         return;
@@ -107,6 +116,7 @@ const findAllMatches = (text: string) => {
   const matches: { url: string; pattern: (typeof patterns)[0] }[] = [];
 
   for (const pattern of patterns) {
+    pattern.regex.lastIndex = 0;
     const regexMatches = text.matchAll(pattern.regex);
     for (const match of regexMatches) {
       matches.push({ url: match[0], pattern });
@@ -162,6 +172,8 @@ bot.on(message("text"), async (ctx) => {
   const matches = findAllMatches(messageText);
   if (matches.length === 0) return;
 
+  const filesToCleanup: string[] = [];
+
   try {
     if (matches.length === 1) {
       const { url, pattern } = matches[0];
@@ -172,6 +184,7 @@ bot.on(message("text"), async (ctx) => {
         url,
         pattern
       );
+      filesToCleanup.push(videoPath);
 
       await ctx.replyWithVideo(
         { source: fs.createReadStream(videoPath) },
@@ -185,8 +198,6 @@ bot.on(message("text"), async (ctx) => {
           height: metadata.height,
         }
       );
-
-      cleanupFiles([videoPath]);
     } else {
       console.log(formatLog(ctx, `Processing ${matches.length} videos`));
 
@@ -214,6 +225,11 @@ bot.on(message("text"), async (ctx) => {
           } => item.result.status === "fulfilled"
         );
 
+      // Track all downloaded files for cleanup
+      successfulDownloads.forEach(({ result }) => {
+        filesToCleanup.push(result.value.path);
+      });
+
       if (successfulDownloads.length > 0) {
         const mediaGroup = successfulDownloads.map(({ result, url, pattern }) => ({
           type: "video" as const,
@@ -226,10 +242,6 @@ bot.on(message("text"), async (ctx) => {
             message_id: ctx.message.message_id,
           },
         });
-
-        cleanupFiles(
-          successfulDownloads.map(({ result }) => result.value.path)
-        );
       }
 
       const failedDownloads = results
@@ -270,6 +282,8 @@ bot.on(message("text"), async (ctx) => {
     } else if (VERBOSE_GROUPS) {
       await ctx.reply("Error processing your request.");
     }
+  } finally {
+    cleanupFiles(filesToCleanup);
   }
 });
 
