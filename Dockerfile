@@ -22,6 +22,6 @@ COPY yt-dlp.conf /etc/yt-dlp/config
 COPY gallery-dl.conf /etc/gallery-dl.conf
 
 # Make scripts executable
-RUN chmod +x /usr/src/app/docker-entrypoint.sh /usr/src/app/scripts/update-ytdlp.sh /usr/src/app/scripts/update-downloaders.sh
+RUN chmod +x /usr/src/app/docker-entrypoint.sh /usr/src/app/scripts/update-downloaders.sh
 
 ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
