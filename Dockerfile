@@ -13,12 +13,15 @@ WORKDIR /usr/src/app
 
 COPY . .
 
-RUN npm install && npm run build && pip install --break-system-packages "yt-dlp[default]"
+RUN npm install && npm run build && pip install --break-system-packages "yt-dlp[default]" gallery-dl
 
 # yt-dlp configuration
 COPY yt-dlp.conf /etc/yt-dlp/config
 
+# gallery-dl configuration
+COPY gallery-dl.conf /etc/gallery-dl.conf
+
 # Make scripts executable
-RUN chmod +x /usr/src/app/docker-entrypoint.sh /usr/src/app/scripts/update-ytdlp.sh
+RUN chmod +x /usr/src/app/docker-entrypoint.sh /usr/src/app/scripts/update-downloaders.sh
 
 ENTRYPOINT ["/usr/src/app/docker-entrypoint.sh"]
