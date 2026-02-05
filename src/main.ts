@@ -563,12 +563,15 @@ const buildCaption = (
   // Prefer gallery-dl caption if available
   if (result.caption) {
     // Append URL to gallery-dl caption for reference when forwarded
-    const captionWithUrl = `${result.caption}\n\n${url}`;
-    caption = truncateWithEllipsis(captionWithUrl, {
-      maxLength: 250,
+    // Reserve space for URL + newlines, truncate caption text first
+    const urlSuffix = `\n\n${url}`;
+    const maxCaptionLength = 250 - urlSuffix.length;
+    const truncatedCaption = truncateWithEllipsis(result.caption, {
+      maxLength: maxCaptionLength,
       ellipsis: " ...",
       preserveWords: true,
     });
+    caption = truncatedCaption ? `${truncatedCaption}${urlSuffix}` : url;
   } else {
     // Fall back to yt-dlp style metadata formatting (already includes URL)
     caption = formatMetadata(result.metadata, pattern, url);
