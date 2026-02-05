@@ -184,15 +184,17 @@ const downloadWithGalleryDl = async (
     let pendingMetadata: GalleryDlMetadata | undefined;
 
     // Use config file for settings, just set output directory
-    // --print with tab-separated path and JSON metadata
+    // --Print (capital P) = download AND print, after: = print after file is saved
+    // --write-metadata writes .json files alongside downloads for metadata
     const galleryDl = execGalleryDl(
       [
         "--config",
-        "./gallery-dl.conf",
+        "/etc/gallery-dl.conf",
         "-d",
         tempDir,
-        "--print",
-        "{_path}\t%()j",
+        "--Print",
+        "after:{_path}",
+        "--write-metadata",
         url,
       ],
       { timeoutMs: DOWNLOAD_TIMEOUT_MS }
@@ -208,32 +210,20 @@ const downloadWithGalleryDl = async (
       console.log(formatLog(ctx), `gallery-dl ${eventType}:`, eventData);
 
       if (eventType === "filename") {
-        // Check if this is our combined path\tJSON format
-        const tabIndex = eventData.indexOf('\t');
-        if (tabIndex !== -1) {
-          const filePath = eventData.substring(0, tabIndex);
-          const jsonStr = eventData.substring(tabIndex + 1);
-          
-          if (fs.existsSync(filePath)) {
-            let metadata: GalleryDlMetadata | undefined;
+        const filePath = eventData.trim();
+        if (fs.existsSync(filePath)) {
+          // Try to read metadata from .json file created by --write-metadata
+          let metadata: GalleryDlMetadata | undefined;
+          const metadataPath = filePath + ".json";
+          if (fs.existsSync(metadataPath)) {
             try {
-              metadata = JSON.parse(jsonStr);
+              const metadataContent = fs.readFileSync(metadataPath, "utf-8");
+              metadata = JSON.parse(metadataContent);
             } catch {
               // JSON parse failed, proceed without metadata
             }
-            filesWithMeta.push({ path: filePath, metadata });
           }
-        } else if (fs.existsSync(eventData)) {
-          // Fallback: plain path without metadata
-          filesWithMeta.push({ path: eventData, metadata: pendingMetadata });
-          pendingMetadata = undefined;
-        }
-      } else if (eventType === "metadata") {
-        // Store metadata to associate with next file
-        try {
-          pendingMetadata = JSON.parse(eventData);
-        } catch {
-          // Ignore parse errors
+          filesWithMeta.push({ path: filePath, metadata });
         }
       } else if (eventType === "stderr") {
         stderrOutput.push(eventData);
