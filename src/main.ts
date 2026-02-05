@@ -454,19 +454,21 @@ const sendMediaAlbum = async (
         { source: fs.createReadStream(file.path) },
         {
           caption,
-          reply_parameters: { message_id: replyToMessageId },
-        }
+          // Telegraf types don't include reply_to_message_id but the API supports it
+          reply_to_message_id: replyToMessageId,
+        } as any
       );
     } else {
       await ctx.replyWithVideo(
         { source: fs.createReadStream(file.path) },
         {
           caption,
-          reply_parameters: { message_id: replyToMessageId },
+          // Telegraf types don't include reply_to_message_id but the API supports it
+          reply_to_message_id: replyToMessageId,
           supports_streaming: true,
           width: file.width,
           height: file.height,
-        }
+        } as any
       );
     }
     return;
@@ -501,9 +503,10 @@ const sendMediaAlbum = async (
       }
     });
 
+    // Telegraf types don't include reply_to_message_id but the API supports it
     await ctx.replyWithMediaGroup(mediaGroup, {
-      reply_parameters: { message_id: replyToMessageId },
-    });
+      reply_to_message_id: replyToMessageId,
+    } as any);
   }
 };
 
@@ -598,6 +601,12 @@ bot.on(message("text"), async (ctx) => {
   if (matches.length === 0) return;
 
   const tempDir = createTempDir();
+
+  // Keep sending typing indicator while processing (expires after 5s)
+  const chatActionInterval = setInterval(() => {
+    ctx.sendChatAction("typing").catch(() => {});
+  }, 4000);
+  await ctx.sendChatAction("typing");
 
   try {
     if (matches.length === 1) {
@@ -725,6 +734,8 @@ bot.on(message("text"), async (ctx) => {
       await ctx.reply("Error processing your request.");
     }
   } finally {
+    // Stop typing indicator
+    clearInterval(chatActionInterval);
     // Clean up temp directory (contains all downloaded files)
     cleanupTempDir(tempDir);
   }
