@@ -512,3 +512,152 @@ describe("execGalleryDl failure cases", () => {
       proc.emit("close", 1);
     }));
 });
+
+describe("execGalleryDl metadata format", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("emits filename event from tab-separated path+JSON format", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execGalleryDl(["https://example.com/gallery"]);
+      const proc = getLastProcess();
+
+      const metadata = JSON.stringify({
+        title: "Test Image",
+        num: 1,
+        extension: "jpg",
+      });
+
+      emitter.on("galleryDlEvent", (type: string, data: string) => {
+        if (type === "filename") {
+          // The whole line is emitted, including path and JSON
+          expect(data).toBe(`/tmp/gallery/image_001.jpg\t${metadata}`);
+          
+          // Verify the format can be parsed
+          const tabIndex = data.indexOf('\t');
+          expect(tabIndex).toBeGreaterThan(0);
+          
+          const path = data.substring(0, tabIndex);
+          const jsonStr = data.substring(tabIndex + 1);
+          
+          expect(path).toBe("/tmp/gallery/image_001.jpg");
+          const parsed = JSON.parse(jsonStr);
+          expect(parsed.title).toBe("Test Image");
+          expect(parsed.num).toBe(1);
+          
+          resolve();
+        }
+      });
+
+      proc.stdout.push(`/tmp/gallery/image_001.jpg\t${metadata}\n`);
+    }));
+
+  it("handles multiple files with tab-separated path+JSON format", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execGalleryDl(["https://example.com/gallery"]);
+      const proc = getLastProcess();
+
+      const files: Array<{ path: string; num: number }> = [];
+
+      emitter.on("galleryDlEvent", (type: string, data: string) => {
+        if (type === "filename") {
+          const tabIndex = data.indexOf('\t');
+          if (tabIndex !== -1) {
+            const path = data.substring(0, tabIndex);
+            const jsonStr = data.substring(tabIndex + 1);
+            const parsed = JSON.parse(jsonStr);
+            files.push({ path, num: parsed.num });
+          }
+          
+          if (files.length === 3) {
+            // Verify all files were captured with correct ordering info
+            expect(files).toEqual([
+              { path: "/tmp/gallery/image_001.jpg", num: 1 },
+              { path: "/tmp/gallery/image_002.jpg", num: 2 },
+              { path: "/tmp/gallery/image_003.jpg", num: 3 },
+            ]);
+            resolve();
+          }
+        }
+      });
+
+      // Simulate multi-file gallery download with metadata
+      const meta1 = JSON.stringify({ num: 1, title: "Image 1" });
+      const meta2 = JSON.stringify({ num: 2, title: "Image 2" });
+      const meta3 = JSON.stringify({ num: 3, title: "Image 3" });
+      
+      proc.stdout.push(`/tmp/gallery/image_001.jpg\t${meta1}\n`);
+      proc.stdout.push(`/tmp/gallery/image_002.jpg\t${meta2}\n`);
+      proc.stdout.push(`/tmp/gallery/image_003.jpg\t${meta3}\n`);
+    }));
+
+  it("handles relative paths with tab-separated JSON", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execGalleryDl(["https://example.com/image.jpg"]);
+      const proc = getLastProcess();
+
+      const metadata = JSON.stringify({ num: 1, content: "Tweet text" });
+
+      emitter.on("galleryDlEvent", (type: string, data: string) => {
+        if (type === "filename") {
+          const tabIndex = data.indexOf('\t');
+          const path = data.substring(0, tabIndex);
+          expect(path).toBe("./downloads/image.jpg");
+          resolve();
+        }
+      });
+
+      proc.stdout.push(`./downloads/image.jpg\t${metadata}\n`);
+    }));
+
+  it("extracts caption fields from metadata (content for Twitter)", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execGalleryDl(["https://twitter.com/user/status/123"]);
+      const proc = getLastProcess();
+
+      const metadata = JSON.stringify({
+        num: 1,
+        content: "This is the tweet text!",
+        title: "Tweet by @user",
+      });
+
+      emitter.on("galleryDlEvent", (type: string, data: string) => {
+        if (type === "filename") {
+          const tabIndex = data.indexOf('\t');
+          const jsonStr = data.substring(tabIndex + 1);
+          const parsed = JSON.parse(jsonStr);
+          
+          // Content field should be available for caption
+          expect(parsed.content).toBe("This is the tweet text!");
+          resolve();
+        }
+      });
+
+      proc.stdout.push(`/tmp/twitter/image.jpg\t${metadata}\n`);
+    }));
+
+  it("extracts caption fields from metadata (description for Instagram)", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execGalleryDl(["https://instagram.com/p/abc123"]);
+      const proc = getLastProcess();
+
+      const metadata = JSON.stringify({
+        num: 1,
+        description: "Instagram caption here #hashtag",
+      });
+
+      emitter.on("galleryDlEvent", (type: string, data: string) => {
+        if (type === "filename") {
+          const tabIndex = data.indexOf('\t');
+          const jsonStr = data.substring(tabIndex + 1);
+          const parsed = JSON.parse(jsonStr);
+          
+          expect(parsed.description).toBe("Instagram caption here #hashtag");
+          resolve();
+        }
+      });
+
+      proc.stdout.push(`/tmp/instagram/image.jpg\t${metadata}\n`);
+    }));
+});

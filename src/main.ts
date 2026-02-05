@@ -1,5 +1,6 @@
 import { Telegraf, Context } from "telegraf";
 import { execYtDlp } from "./ytdlp";
+import { execGalleryDl } from "./gallerydl";
 import dotenv from "dotenv";
 import { message } from "telegraf/filters";
 import fs from "fs";
@@ -16,6 +17,20 @@ const VERBOSE_GROUPS = process.env.VERBOSE_GROUPS === "true";
 const TEMP_DIR = "./temp";
 const MAX_MEDIA_GROUP = 10;
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+// Telegram file size limits
+const MAX_PHOTO_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
+
+// Image extensions for photo vs video detection
+const IMAGE_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".bmp",
+]);
 
 if (!TOKEN) {
   console.error(
@@ -44,18 +59,279 @@ const isVerbose = (ctx: Context): boolean => {
 
 const bot = new Telegraf(TOKEN);
 
+interface MediaFile {
+  path: string;
+  type: "photo" | "video";
+  size: number;
+  order?: number; // For gallery-dl: num field from metadata
+}
+
+interface DownloadResult {
+  files: MediaFile[];
+  metadata: VideoMetadata;
+  partialSuccess?: boolean;
+  caption?: string;
+}
+
 interface VideoDownloadResult {
   path: string;
   metadata: VideoMetadata;
 }
 
+/**
+ * Determine if a file is a photo or video based on extension
+ */
+const getMediaType = (filePath: string): "photo" | "video" => {
+  const ext = path.extname(filePath).toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext) ? "photo" : "video";
+};
+
+/**
+ * Create a unique temp directory for a download request
+ */
+const createTempDir = (): string => {
+  const dirName = `dl-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  const dirPath = path.join(TEMP_DIR, dirName);
+  fs.mkdirSync(dirPath, { recursive: true });
+  return dirPath;
+};
+
+/**
+ * Clean up a temp directory and all its contents
+ */
+const cleanupTempDir = (dirPath: string) => {
+  try {
+    if (fs.existsSync(dirPath)) {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.error(`Error cleaning up temp dir ${dirPath}: ${err}`);
+  }
+};
+
+/**
+ * Filter files by Telegram size limits
+ * Returns files that are within limits and logs warnings for oversized files
+ */
+const filterByTelegramLimits = (
+  files: MediaFile[],
+  ctx: Context
+): MediaFile[] => {
+  return files.filter((file) => {
+    const maxSize = file.type === "photo" ? MAX_PHOTO_SIZE : MAX_VIDEO_SIZE;
+    if (file.size > maxSize) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      const limitMB = (maxSize / (1024 * 1024)).toFixed(0);
+      console.log(
+        formatLog(
+          ctx,
+          `Skipping ${file.path}: ${sizeMB}MB exceeds Telegram ${file.type} limit of ${limitMB}MB`
+        )
+      );
+      return false;
+    }
+    return true;
+  });
+};
+
+/**
+ * Metadata fields from gallery-dl that we use for captions
+ */
+interface GalleryDlMetadata {
+  title?: string;
+  description?: string;
+  content?: string; // Twitter tweet text
+  caption?: string; // Instagram
+  num?: number; // File ordering within a post
+  [key: string]: any;
+}
+
+/**
+ * Extract caption text from gallery-dl metadata
+ * Different sites use different field names
+ */
+const extractCaption = (metadata: GalleryDlMetadata): string | undefined => {
+  // Try common caption fields in order of preference
+  const captionText = metadata.content || metadata.description || metadata.caption || metadata.title;
+  
+  // Only return non-empty strings
+  if (captionText && typeof captionText === 'string' && captionText.trim()) {
+    return captionText.trim();
+  }
+  return undefined;
+};
+
+/**
+ * Download using gallery-dl
+ * Returns files and metadata, or throws on complete failure
+ */
+const downloadWithGalleryDl = async (
+  ctx: Context,
+  url: string,
+  tempDir: string
+): Promise<DownloadResult> => {
+  return new Promise((resolve, reject) => {
+    console.log(formatLog(ctx, `Attempting gallery-dl for URL: ${url}`));
+
+    // Track files with their metadata
+    interface FileWithMeta {
+      path: string;
+      metadata?: GalleryDlMetadata;
+    }
+    const filesWithMeta: FileWithMeta[] = [];
+    let stderrOutput: string[] = [];
+    let hadError = false;
+    let pendingMetadata: GalleryDlMetadata | undefined;
+
+    // Use config file for settings, just set output directory
+    // --print with tab-separated path and JSON metadata
+    const galleryDl = execGalleryDl(
+      [
+        "--config",
+        "./gallery-dl.conf",
+        "-d",
+        tempDir,
+        "--print",
+        "{_path}\t%()j",
+        url,
+      ],
+      { timeoutMs: DOWNLOAD_TIMEOUT_MS }
+    );
+
+    const timeout = setTimeout(() => {
+      console.error(formatLog(ctx, `gallery-dl timed out for URL: ${url}`));
+      galleryDl.kill("SIGTERM");
+      reject(new Error("Download timed out"));
+    }, DOWNLOAD_TIMEOUT_MS);
+
+    galleryDl.on("galleryDlEvent", (eventType, eventData) => {
+      console.log(formatLog(ctx), `gallery-dl ${eventType}:`, eventData);
+
+      if (eventType === "filename") {
+        // Check if this is our combined path\tJSON format
+        const tabIndex = eventData.indexOf('\t');
+        if (tabIndex !== -1) {
+          const filePath = eventData.substring(0, tabIndex);
+          const jsonStr = eventData.substring(tabIndex + 1);
+          
+          if (fs.existsSync(filePath)) {
+            let metadata: GalleryDlMetadata | undefined;
+            try {
+              metadata = JSON.parse(jsonStr);
+            } catch {
+              // JSON parse failed, proceed without metadata
+            }
+            filesWithMeta.push({ path: filePath, metadata });
+          }
+        } else if (fs.existsSync(eventData)) {
+          // Fallback: plain path without metadata
+          filesWithMeta.push({ path: eventData, metadata: pendingMetadata });
+          pendingMetadata = undefined;
+        }
+      } else if (eventType === "metadata") {
+        // Store metadata to associate with next file
+        try {
+          pendingMetadata = JSON.parse(eventData);
+        } catch {
+          // Ignore parse errors
+        }
+      } else if (eventType === "stderr") {
+        stderrOutput.push(eventData);
+      }
+    });
+
+    galleryDl.on("error", (error) => {
+      clearTimeout(timeout);
+      console.error(formatLog(ctx, `gallery-dl error: ${error}`));
+      hadError = true;
+
+      // If we got some files before the error, return partial success
+      if (filesWithMeta.length > 0) {
+        console.log(
+          formatLog(
+            ctx,
+            `gallery-dl partial success: ${filesWithMeta.length} files before error`
+          )
+        );
+        resolveWithFiles(true);
+      } else {
+        reject(error);
+      }
+    });
+
+    galleryDl.on("close", () => {
+      clearTimeout(timeout);
+
+      if (filesWithMeta.length === 0) {
+        // Check stderr for common error patterns
+        const noExtractor = stderrOutput.some((line) =>
+          line.includes("No suitable extractor")
+        );
+        if (noExtractor) {
+          reject(new Error("gallery-dl: No suitable extractor found"));
+        } else {
+          reject(new Error("gallery-dl: No files downloaded"));
+        }
+        return;
+      }
+
+      resolveWithFiles(hadError);
+    });
+
+    const resolveWithFiles = (isPartial: boolean) => {
+      // Sort files by 'num' metadata field if available, otherwise preserve order
+      const sortedFiles = [...filesWithMeta];
+      const hasOrderInfo = sortedFiles.some(f => f.metadata?.num !== undefined);
+      
+      if (hasOrderInfo) {
+        sortedFiles.sort((a, b) => {
+          const numA = a.metadata?.num ?? Infinity;
+          const numB = b.metadata?.num ?? Infinity;
+          return numA - numB;
+        });
+      }
+      // If no order info, preserve original order (don't sort)
+
+      const mediaFiles: MediaFile[] = sortedFiles.map((file) => {
+        const stats = fs.statSync(file.path);
+        return {
+          path: file.path,
+          type: getMediaType(file.path),
+          size: stats.size,
+          order: file.metadata?.num,
+        };
+      });
+
+      // Extract caption from first file's metadata
+      const firstMeta = sortedFiles[0]?.metadata;
+      const caption = firstMeta ? extractCaption(firstMeta) : undefined;
+
+      console.log(
+        formatLog(ctx, `gallery-dl completed: ${mediaFiles.length} files${isPartial ? ' (partial)' : ''}`)
+      );
+      resolve({
+        files: mediaFiles,
+        metadata: firstMeta || {},
+        partialSuccess: isPartial,
+        caption,
+      });
+    };
+  });
+};
+
+/**
+ * Download video using yt-dlp (original implementation)
+ * Now uses the per-request temp directory for consistency with gallery-dl
+ */
 const downloadVideo = async (
   ctx: Context,
   url: string,
-  flags: string[]
+  flags: string[],
+  tempDir: string
 ): Promise<VideoDownloadResult> => {
+  // Use per-request temp directory with unique filename
   const outputPath = path.join(
-    TEMP_DIR,
+    tempDir,
     `video-${Date.now()}-${Math.random().toString(36).substring(7)}`
   );
 
@@ -102,10 +378,7 @@ const downloadVideo = async (
     download.on("error", (error) => {
       clearTimeout(timeout);
       console.error(formatLog(ctx, `Download error: ${error}`));
-
-      fs.unlink(outputPath, (err) => {
-        if (err) console.error(formatLog(ctx, `Cleanup failed: ${err}`));
-      });
+      // No need to clean up individual files - tempDir cleanup handles it
       reject(error);
     });
 
@@ -138,9 +411,10 @@ const findAllMatches = (text: string) => {
 const processVideo = (
   ctx: Context,
   url: string,
-  pattern: (typeof patterns)[0]
+  pattern: (typeof patterns)[0],
+  tempDir: string
 ): Promise<VideoDownloadResult> => {
-  return downloadVideo(ctx, url, pattern.flags);
+  return downloadVideo(ctx, url, pattern.flags, tempDir);
 };
 
 const formatMetadata = (
@@ -157,14 +431,157 @@ const formatMetadata = (
     }
   );
 
-const cleanupFiles = (files: string[]) => {
-  files.forEach((file) => {
-    fs.unlink(file, (err) => {
-      if (err) {
-        console.error(`Error deleting temp file ${file}: ${err}`);
+/**
+ * Split files into album-sized chunks (max 10 per album)
+ */
+const chunkArray = <T>(arr: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+};
+
+/**
+ * Send media files as Telegram album(s)
+ * Handles splitting into multiple albums if >10 files
+ */
+const sendMediaAlbum = async (
+  ctx: Context,
+  files: MediaFile[],
+  replyToMessageId: number,
+  caption?: string
+) => {
+  if (files.length === 0) return;
+
+  // Single file - use appropriate method
+  if (files.length === 1) {
+    const file = files[0];
+    if (file.type === "photo") {
+      await ctx.replyWithPhoto(
+        { source: fs.createReadStream(file.path) },
+        {
+          caption,
+          reply_parameters: { message_id: replyToMessageId },
+        }
+      );
+    } else {
+      await ctx.replyWithVideo(
+        { source: fs.createReadStream(file.path) },
+        {
+          caption,
+          reply_parameters: { message_id: replyToMessageId },
+          supports_streaming: true,
+        }
+      );
+    }
+    return;
+  }
+
+  // Multiple files - send as album(s)
+  const chunks = chunkArray(files, MAX_MEDIA_GROUP);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    // Only add caption to first item of first album
+    const isFirstAlbum = i === 0;
+
+    const mediaGroup = chunk.map((file, index) => {
+      const itemCaption = isFirstAlbum && index === 0 ? caption : undefined;
+
+      if (file.type === "photo") {
+        return {
+          type: "photo" as const,
+          media: { source: fs.createReadStream(file.path) },
+          caption: itemCaption,
+        };
+      } else {
+        return {
+          type: "video" as const,
+          media: { source: fs.createReadStream(file.path) },
+          caption: itemCaption,
+          supports_streaming: true,
+        };
       }
     });
-  });
+
+    await ctx.replyWithMediaGroup(mediaGroup, {
+      reply_parameters: { message_id: replyToMessageId },
+    });
+  }
+};
+
+/**
+ * Process a single URL: try gallery-dl first, fall back to yt-dlp
+ */
+const processUrl = async (
+  ctx: Context,
+  url: string,
+  pattern: (typeof patterns)[0],
+  tempDir: string
+): Promise<DownloadResult> => {
+  // Try gallery-dl first
+  try {
+    const result = await downloadWithGalleryDl(ctx, url, tempDir);
+    if (result.files.length > 0) {
+      return result;
+    }
+  } catch (error: any) {
+    console.log(
+      formatLog(ctx, `gallery-dl failed for ${url}: ${error.message}`)
+    );
+    // Continue to yt-dlp fallback
+  }
+
+  // Fall back to yt-dlp
+  console.log(formatLog(ctx, `Falling back to yt-dlp for ${url}`));
+  const { path: videoPath, metadata } = await processVideo(ctx, url, pattern, tempDir);
+
+  const stats = fs.statSync(videoPath);
+  return {
+    files: [
+      {
+        path: videoPath,
+        type: getMediaType(videoPath),
+        size: stats.size,
+      },
+    ],
+    metadata,
+    // yt-dlp caption comes from formatMetadata in the caller
+  };
+};
+
+/**
+ * Build caption for a download result
+ * Handles gallery-dl captions, yt-dlp metadata, and partial success notes
+ */
+const buildCaption = (
+  result: DownloadResult,
+  pattern: (typeof patterns)[0],
+  url: string
+): string | undefined => {
+  let caption: string | undefined;
+
+  // Prefer gallery-dl caption if available
+  if (result.caption) {
+    caption = truncateWithEllipsis(result.caption, {
+      maxLength: 250,
+      ellipsis: " ...",
+      preserveWords: true,
+    });
+  } else {
+    // Fall back to yt-dlp style metadata formatting
+    caption = formatMetadata(result.metadata, pattern, url);
+  }
+
+  // Append partial success note if applicable
+  if (result.partialSuccess && caption) {
+    caption = `${caption}\n\n(some content could not be downloaded)`;
+  } else if (result.partialSuccess) {
+    caption = "(some content could not be downloaded)";
+  }
+
+  return caption;
 };
 
 bot.on(message("text"), async (ctx) => {
@@ -174,78 +591,94 @@ bot.on(message("text"), async (ctx) => {
   const matches = findAllMatches(messageText);
   if (matches.length === 0) return;
 
-  const filesToCleanup: string[] = [];
+  const tempDir = createTempDir();
 
   try {
     if (matches.length === 1) {
       const { url, pattern } = matches[0];
-      console.log(formatLog(ctx, `Processing single video from URL: ${url}`));
+      console.log(formatLog(ctx, `Processing URL: ${url}`));
 
-      const { path: videoPath, metadata } = await processVideo(
-        ctx,
-        url,
-        pattern
-      );
-      filesToCleanup.push(videoPath);
+      const result = await processUrl(ctx, url, pattern, tempDir);
 
-      await ctx.replyWithVideo(
-        { source: fs.createReadStream(videoPath) },
-        {
-          caption: formatMetadata(metadata, pattern, url),
-          reply_parameters: {
-            message_id: ctx.message.message_id,
-          },
-          supports_streaming: true,
-          width: metadata.width,
-          height: metadata.height,
+      // Filter by Telegram limits
+      const validFiles = filterByTelegramLimits(result.files, ctx);
+
+      if (validFiles.length === 0) {
+        if (isVerbose(ctx)) {
+          await ctx.reply("All files exceed Telegram size limits.");
         }
-      );
+        return;
+      }
+
+      const caption = buildCaption(result, pattern, url);
+      await sendMediaAlbum(ctx, validFiles, ctx.message.message_id, caption);
     } else {
-      console.log(formatLog(ctx, `Processing ${matches.length} videos`));
+      // Multiple URLs
+      console.log(formatLog(ctx, `Processing ${matches.length} URLs`));
 
       if (isVerbose(ctx)) {
-        await ctx.reply(`Processing ${matches.length} videos...`);
+        await ctx.reply(`Processing ${matches.length} URLs...`);
       }
 
       const results = await Promise.allSettled(
-        matches.map(({ url, pattern }) => processVideo(ctx, url, pattern))
+        matches.map(({ url, pattern }) => processUrl(ctx, url, pattern, tempDir))
       );
 
-      const successfulDownloads = results
-        .map((result, index) => ({
-          result,
-          url: matches[index].url,
-          pattern: matches[index].pattern,
-        }))
-        .filter(
-          (
-            item
-          ): item is {
-            result: PromiseFulfilledResult<VideoDownloadResult>;
-            url: string;
-            pattern: (typeof patterns)[0];
-          } => item.result.status === "fulfilled"
-        );
+      // Collect all successful files with their result info
+      const allFiles: { 
+        file: MediaFile; 
+        url: string; 
+        pattern: (typeof patterns)[0]; 
+        result: DownloadResult;
+      }[] = [];
 
-      // Track all downloaded files for cleanup
-      successfulDownloads.forEach(({ result }) => {
-        filesToCleanup.push(result.value.path);
+      results.forEach((promiseResult, index) => {
+        if (promiseResult.status === "fulfilled") {
+          promiseResult.value.files.forEach((file) => {
+            allFiles.push({
+              file,
+              url: matches[index].url,
+              pattern: matches[index].pattern,
+              result: promiseResult.value,
+            });
+          });
+        }
       });
 
-      if (successfulDownloads.length > 0) {
-        const mediaGroup = successfulDownloads.map(({ result, url, pattern }) => ({
-          type: "video" as const,
-          media: { source: fs.createReadStream(result.value.path) },
-          caption: formatMetadata(result.value.metadata, pattern, url),
-        }));
+      // Filter by Telegram limits
+      const validItems = allFiles.filter((item) => {
+        const maxSize =
+          item.file.type === "photo" ? MAX_PHOTO_SIZE : MAX_VIDEO_SIZE;
+        if (item.file.size > maxSize) {
+          const sizeMB = (item.file.size / (1024 * 1024)).toFixed(1);
+          const limitMB = (maxSize / (1024 * 1024)).toFixed(0);
+          console.log(
+            formatLog(
+              ctx,
+              `Skipping ${item.file.path}: ${sizeMB}MB exceeds Telegram ${item.file.type} limit of ${limitMB}MB`
+            )
+          );
+          return false;
+        }
+        return true;
+      });
 
-        await ctx.replyWithMediaGroup(mediaGroup, {
-          reply_parameters: {
-            message_id: ctx.message.message_id,
-          },
-        });
+      if (validItems.length > 0) {
+        // Group files into albums
+        const files = validItems.map((item) => item.file);
+
+        // Use first item for caption
+        const firstItem = validItems[0];
+        const caption = buildCaption(
+          firstItem.result,
+          firstItem.pattern,
+          firstItem.url
+        );
+
+        await sendMediaAlbum(ctx, files, ctx.message.message_id, caption);
       }
 
+      // Report failures
       const failedDownloads = results
         .map((result, index) => ({ result, index }))
         .filter(
@@ -264,12 +697,10 @@ bot.on(message("text"), async (ctx) => {
             .join("\n");
 
           await ctx.reply(
-            `Failed to process ${failedDownloads.length} video(s):\n${errorMessages}`
+            `Failed to process ${failedDownloads.length} URL(s):\n${errorMessages}`
           );
         } else if (VERBOSE_GROUPS) {
-          await ctx.reply(
-            `Failed to process ${failedDownloads.length} video(s).`
-          );
+          await ctx.reply(`Failed to process ${failedDownloads.length} URL(s).`);
         }
       }
     }
@@ -278,14 +709,18 @@ bot.on(message("text"), async (ctx) => {
 
     if (isPrivateChat(ctx)) {
       const errorMessage = error.message || String(error);
-      await ctx.reply(`Error processing your request:\n\`\`\`\n${errorMessage}\n\`\`\``, {
-        parse_mode: "Markdown",
-      });
+      await ctx.reply(
+        `Error processing your request:\n\`\`\`\n${errorMessage}\n\`\`\``,
+        {
+          parse_mode: "Markdown",
+        }
+      );
     } else if (VERBOSE_GROUPS) {
       await ctx.reply("Error processing your request.");
     }
   } finally {
-    cleanupFiles(filesToCleanup);
+    // Clean up temp directory (contains all downloaded files)
+    cleanupTempDir(tempDir);
   }
 });
 

@@ -87,6 +87,19 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
         continue;
       }
 
+      // Check for path\tJSON format (from --print "{_path}\t%()j")
+      // The tab separates the file path from the JSON metadata
+      const tabIndex = line.indexOf('\t');
+      if (tabIndex !== -1) {
+        const potentialPath = line.substring(0, tabIndex);
+        // Check if the first part looks like a path
+        if (potentialPath.match(/^[\/\.].*\.[a-zA-Z0-9]+$/) || potentialPath.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/)) {
+          // Emit the whole line - caller can parse path and JSON
+          emitter.emit("galleryDlEvent", "filename", line);
+          continue;
+        }
+      }
+
       // Plain path (when using --print filename or similar)
       // Must look like an absolute or relative path to a file
       if (line.match(/^[\/\.].*\.[a-zA-Z0-9]+$/) || line.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/)) {
