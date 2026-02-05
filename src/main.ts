@@ -562,21 +562,26 @@ const buildCaption = (
 
   // Prefer gallery-dl caption if available
   if (result.caption) {
-    caption = truncateWithEllipsis(result.caption, {
+    // Append URL to gallery-dl caption for reference when forwarded
+    const captionWithUrl = `${result.caption}\n\n${url}`;
+    caption = truncateWithEllipsis(captionWithUrl, {
       maxLength: 250,
       ellipsis: " ...",
       preserveWords: true,
     });
   } else {
-    // Fall back to yt-dlp style metadata formatting
+    // Fall back to yt-dlp style metadata formatting (already includes URL)
     caption = formatMetadata(result.metadata, pattern, url);
   }
 
+  // If still no caption, at least include the URL for reference
+  if (!caption) {
+    caption = url;
+  }
+
   // Append partial success note if applicable
-  if (result.partialSuccess && caption) {
+  if (result.partialSuccess) {
     caption = `${caption}\n\n(some content could not be downloaded)`;
-  } else if (result.partialSuccess) {
-    caption = "(some content could not be downloaded)";
   }
 
   return caption;
