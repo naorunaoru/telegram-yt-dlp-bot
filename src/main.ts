@@ -64,6 +64,8 @@ interface MediaFile {
   type: "photo" | "video";
   size: number;
   order?: number; // For gallery-dl: num field from metadata
+  width?: number;  // Video dimensions for Telegram
+  height?: number;
 }
 
 interface DownloadResult {
@@ -462,6 +464,8 @@ const sendMediaAlbum = async (
           caption,
           reply_parameters: { message_id: replyToMessageId },
           supports_streaming: true,
+          width: file.width,
+          height: file.height,
         }
       );
     }
@@ -491,6 +495,8 @@ const sendMediaAlbum = async (
           media: { source: fs.createReadStream(file.path) },
           caption: itemCaption,
           supports_streaming: true,
+          width: file.width,
+          height: file.height,
         };
       }
     });
@@ -534,6 +540,8 @@ const processUrl = async (
         path: videoPath,
         type: getMediaType(videoPath),
         size: stats.size,
+        width: metadata.width,
+        height: metadata.height,
       },
     ],
     metadata,

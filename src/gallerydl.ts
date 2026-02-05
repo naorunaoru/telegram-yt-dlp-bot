@@ -101,8 +101,17 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
       }
 
       // Plain path (when using --print filename or similar)
-      // Must look like an absolute or relative path to a file
-      if (line.match(/^[\/\.].*\.[a-zA-Z0-9]+$/) || line.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/)) {
+      // Matches:
+      // - Absolute Unix paths: /path/to/file.ext
+      // - Relative paths with dot: ./path/to/file.ext
+      // - Relative paths without dot: temp/path/to/file.ext, path/file.ext
+      // - Windows paths: C:\path\to\file.ext
+      if (
+        line.match(/^\/.*\.[a-zA-Z0-9]+$/) ||           // Absolute Unix: /path/to/file.ext
+        line.match(/^\..*\.[a-zA-Z0-9]+$/) ||           // Dot-relative: ./path/file.ext
+        line.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/) ||  // Windows: C:\path\file.ext
+        line.match(/^[a-zA-Z0-9_-]+\/.*\.[a-zA-Z0-9]+$/) // Relative: temp/path/file.ext
+      ) {
         emitter.emit("galleryDlEvent", "filename", line);
         continue;
       }
