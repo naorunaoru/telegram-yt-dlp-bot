@@ -454,6 +454,7 @@ const sendMediaAlbum = async (
         { source: fs.createReadStream(file.path) },
         {
           caption,
+          // Telegraf types don't include reply_to_message_id but the API supports it
           reply_to_message_id: replyToMessageId,
         } as any
       );
@@ -462,6 +463,7 @@ const sendMediaAlbum = async (
         { source: fs.createReadStream(file.path) },
         {
           caption,
+          // Telegraf types don't include reply_to_message_id but the API supports it
           reply_to_message_id: replyToMessageId,
           supports_streaming: true,
           width: file.width,
@@ -501,6 +503,7 @@ const sendMediaAlbum = async (
       }
     });
 
+    // Telegraf types don't include reply_to_message_id but the API supports it
     await ctx.replyWithMediaGroup(mediaGroup, {
       reply_to_message_id: replyToMessageId,
     } as any);
