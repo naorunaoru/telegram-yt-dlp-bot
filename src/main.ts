@@ -10,6 +10,14 @@ import { spawn } from "child_process";
 import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
 import { VideoMetadata } from "./types";
+import {
+  initCache,
+  getCachedMedia,
+  setCachedMedia,
+  evictOldEntries,
+  CachedFile,
+  CachedEntry,
+} from "./cache";
 
 dotenv.config();
 
@@ -18,6 +26,10 @@ const VERBOSE_GROUPS = process.env.VERBOSE_GROUPS === "true";
 const TEMP_DIR = "./temp";
 const MAX_MEDIA_GROUP = 10;
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+// Cache configuration
+const CACHE_DB_PATH = process.env.CACHE_DB_PATH || "./data/cache.db";
+const CACHE_MAX_ENTRIES = parseInt(process.env.CACHE_MAX_ENTRIES || "100000", 10);
 
 // Telegram file size limits
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024; // 10MB
@@ -537,35 +549,161 @@ const chunkArray = <T>(arr: T[], size: number): T[][] => {
 };
 
 /**
+ * Telegram message with media - union of possible response types
+ */
+interface TelegramMediaMessage {
+  photo?: Array<{ file_id: string; width: number; height: number }>;
+  video?: { file_id: string; width?: number; height?: number };
+  animation?: { file_id: string; width?: number; height?: number };
+}
+
+/**
+ * Extract file_id and type from a Telegram message response
+ */
+const extractFileIdFromMessage = (
+  msg: TelegramMediaMessage,
+  fileIndex: number
+): CachedFile | null => {
+  if (msg.video) {
+    return {
+      telegram_file_id: msg.video.file_id,
+      file_type: "video",
+      file_order: fileIndex,
+      width: msg.video.width,
+      height: msg.video.height,
+    };
+  }
+  if (msg.animation) {
+    return {
+      telegram_file_id: msg.animation.file_id,
+      file_type: "animation",
+      file_order: fileIndex,
+      width: msg.animation.width,
+      height: msg.animation.height,
+    };
+  }
+  if (msg.photo && msg.photo.length > 0) {
+    // Use largest photo (last in array)
+    const largest = msg.photo[msg.photo.length - 1];
+    return {
+      telegram_file_id: largest.file_id,
+      file_type: "photo",
+      file_order: fileIndex,
+      width: largest.width,
+      height: largest.height,
+    };
+  }
+  return null;
+};
+
+/**
+ * Send cached media using Telegram file_ids
+ * Returns true if successful, false if cache should be invalidated
+ */
+const sendCachedMedia = async (
+  ctx: Context,
+  cached: CachedEntry,
+  replyToMessageId: number
+): Promise<boolean> => {
+  try {
+    const { files, caption } = cached;
+
+    if (files.length === 0) return false;
+
+    if (files.length === 1) {
+      const file = files[0];
+      if (file.file_type === "photo") {
+        await ctx.replyWithPhoto(file.telegram_file_id, {
+          caption,
+          reply_to_message_id: replyToMessageId,
+        } as any);
+      } else if (file.file_type === "animation") {
+        await ctx.replyWithAnimation(file.telegram_file_id, {
+          caption,
+          reply_to_message_id: replyToMessageId,
+        } as any);
+      } else {
+        await ctx.replyWithVideo(file.telegram_file_id, {
+          caption,
+          reply_to_message_id: replyToMessageId,
+          supports_streaming: true,
+        } as any);
+      }
+      return true;
+    }
+
+    // Multiple files - send as album(s)
+    const chunks = chunkArray(files, MAX_MEDIA_GROUP);
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const isFirstAlbum = i === 0;
+
+      const mediaGroup = chunk.map((file, index) => {
+        const itemCaption = isFirstAlbum && index === 0 ? caption : undefined;
+
+        if (file.file_type === "photo") {
+          return {
+            type: "photo" as const,
+            media: file.telegram_file_id,
+            caption: itemCaption,
+          };
+        } else {
+          return {
+            type: "video" as const,
+            media: file.telegram_file_id,
+            caption: itemCaption,
+            supports_streaming: true,
+          };
+        }
+      });
+
+      await ctx.replyWithMediaGroup(mediaGroup, {
+        reply_to_message_id: replyToMessageId,
+      } as any);
+    }
+
+    return true;
+  } catch (error: any) {
+    // File_id might be invalid (expired or from different bot)
+    console.error(`Cache send failed: ${error.message}`);
+    return false;
+  }
+};
+
+/**
  * Send media files as Telegram album(s)
  * Handles splitting into multiple albums if >10 files
+ * Returns extracted file_ids for caching
  */
 const sendMediaAlbum = async (
   ctx: Context,
   files: MediaFile[],
   replyToMessageId: number,
   caption?: string
-) => {
-  if (files.length === 0) return;
+): Promise<CachedFile[]> => {
+  const extractedFiles: CachedFile[] = [];
+
+  if (files.length === 0) return extractedFiles;
 
   // Single file - use appropriate method
   if (files.length === 1) {
     const file = files[0];
+    let msg: TelegramMediaMessage;
+
     if (file.type === "photo") {
-      await ctx.replyWithPhoto(
+      msg = await ctx.replyWithPhoto(
         { source: fs.createReadStream(file.path) },
         {
           caption,
-          // Telegraf types don't include reply_to_message_id but the API supports it
           reply_to_message_id: replyToMessageId,
         } as any
       );
     } else {
-      await ctx.replyWithVideo(
+      msg = await ctx.replyWithVideo(
         { source: fs.createReadStream(file.path) },
         {
           caption,
-          // Telegraf types don't include reply_to_message_id but the API supports it
           reply_to_message_id: replyToMessageId,
           supports_streaming: true,
           width: file.width,
@@ -573,15 +711,18 @@ const sendMediaAlbum = async (
         } as any
       );
     }
-    return;
+
+    const extracted = extractFileIdFromMessage(msg, 0);
+    if (extracted) extractedFiles.push(extracted);
+    return extractedFiles;
   }
 
   // Multiple files - send as album(s)
   const chunks = chunkArray(files, MAX_MEDIA_GROUP);
+  let fileIndex = 0;
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
-    // Only add caption to first item of first album
     const isFirstAlbum = i === 0;
 
     const mediaGroup = chunk.map((file, index) => {
@@ -605,11 +746,19 @@ const sendMediaAlbum = async (
       }
     });
 
-    // Telegraf types don't include reply_to_message_id but the API supports it
-    await ctx.replyWithMediaGroup(mediaGroup, {
+    // replyWithMediaGroup returns an array of messages
+    const messages = (await ctx.replyWithMediaGroup(mediaGroup, {
       reply_to_message_id: replyToMessageId,
-    } as any);
+    } as any)) as TelegramMediaMessage[];
+
+    // Extract file_ids from each message
+    for (const msg of messages) {
+      const extracted = extractFileIdFromMessage(msg, fileIndex++);
+      if (extracted) extractedFiles.push(extracted);
+    }
   }
+
+  return extractedFiles;
 };
 
 /**
@@ -715,6 +864,18 @@ bot.on(message("text"), async (ctx) => {
       const { url, pattern } = matches[0];
       console.log(formatLog(ctx, `Processing URL: ${url}`));
 
+      // Check cache first
+      const cached = getCachedMedia(url);
+      if (cached && cached.files.length > 0) {
+        console.log(formatLog(ctx, `Cache hit for ${url}`));
+        const sent = await sendCachedMedia(ctx, cached, ctx.message.message_id);
+        if (sent) {
+          return; // Cache hit successful
+        }
+        // Cache send failed, fall through to re-download
+        console.log(formatLog(ctx, `Cache invalid for ${url}, re-downloading`));
+      }
+
       const result = await processUrl(ctx, url, pattern, tempDir);
 
       // Convert GIFs to MP4 for proper animation support
@@ -731,7 +892,23 @@ bot.on(message("text"), async (ctx) => {
       }
 
       const caption = buildCaption(result, pattern, url);
-      await sendMediaAlbum(ctx, validFiles, ctx.message.message_id, caption);
+      const extractedFiles = await sendMediaAlbum(ctx, validFiles, ctx.message.message_id, caption);
+
+      // Cache the file_ids for future requests
+      if (extractedFiles.length > 0) {
+        try {
+          setCachedMedia({
+            url,
+            files: extractedFiles,
+            caption,
+            metadata: result.metadata,
+          });
+          evictOldEntries(CACHE_MAX_ENTRIES);
+          console.log(formatLog(ctx, `Cached ${extractedFiles.length} files for ${url}`));
+        } catch (cacheError: any) {
+          console.error(formatLog(ctx, `Cache write failed: ${cacheError.message}`));
+        }
+      }
     } else {
       // Multiple URLs
       console.log(formatLog(ctx, `Processing ${matches.length} URLs`));
@@ -850,6 +1027,14 @@ bot.on(message("text"), async (ctx) => {
 });
 
 const initializeBot = async () => {
+  // Initialize cache
+  try {
+    initCache(CACHE_DB_PATH);
+  } catch (err) {
+    console.error("Failed to initialize cache:", err);
+    // Continue without cache - it's not critical
+  }
+
   await bot.launch().catch((err) => {
     console.error("Error starting bot:", err);
     process.exit(1);
