@@ -81,6 +81,7 @@ interface MediaFile {
   order?: number; // For gallery-dl: num field from metadata
   width?: number;  // Video dimensions for Telegram
   height?: number;
+  thumbnailPath?: string; // Extracted thumbnail for Telegram
 }
 
 interface DownloadResult {
@@ -148,18 +149,21 @@ const convertGifToVideo = async (gifPath: string): Promise<string> => {
     
     if (useVaapi) {
       // Hardware-accelerated encoding with VAAPI
+      // Scale to even dimensions (required by H.264) before hwupload
       ffmpegArgs = [
         "-i", gifPath,
         "-vaapi_device", VAAPI_DEVICE,
-        "-vf", "format=nv12,hwupload",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=nv12,hwupload",
         "-c:v", "h264_vaapi",
         "-y", // Overwrite output
         outputPath,
       ];
     } else {
       // Software encoding fallback
+      // Scale to even dimensions (required by H.264)
       ffmpegArgs = [
         "-i", gifPath,
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
@@ -230,6 +234,14 @@ const processMediaFiles = async (files: MediaFile[]): Promise<MediaFile[]> => {
       }
     }
     
+    // Extract thumbnail for videos
+    if (processedFile.type === "video") {
+      const thumbnailPath = await extractThumbnail(processedFile.path);
+      if (thumbnailPath) {
+        processedFile.thumbnailPath = thumbnailPath;
+      }
+    }
+    
     processedFiles.push(processedFile);
   }
   
@@ -276,6 +288,38 @@ const getVideoDimensions = (
     });
 
     ffprobe.on("error", () => {
+      resolve(undefined);
+    });
+  });
+};
+
+/**
+ * Extract thumbnail from video using ffmpeg
+ * Returns path to thumbnail or undefined if extraction fails
+ */
+const extractThumbnail = (videoPath: string): Promise<string | undefined> => {
+  return new Promise((resolve) => {
+    const thumbnailPath = videoPath.replace(/\.[^.]+$/, "_thumb.jpg");
+    
+    const ffmpeg = spawn("ffmpeg", [
+      "-y",
+      "-i", videoPath,
+      "-ss", "00:00:01",  // Seek to 1 second
+      "-vframes", "1",
+      "-vf", "scale=320:-1",  // 320px wide, maintain aspect ratio
+      "-q:v", "5",  // Quality (2-31, lower is better)
+      thumbnailPath,
+    ]);
+
+    ffmpeg.on("close", (code) => {
+      if (code === 0 && fs.existsSync(thumbnailPath)) {
+        resolve(thumbnailPath);
+      } else {
+        resolve(undefined);
+      }
+    });
+
+    ffmpeg.on("error", () => {
       resolve(undefined);
     });
   });
@@ -749,7 +793,7 @@ const sendMediaAlbum = async (
 
     if (file.type === "photo") {
       msg = await ctx.replyWithPhoto(
-        { source: fs.createReadStream(file.path) },
+        { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
         {
           caption,
           reply_to_message_id: replyToMessageId,
@@ -757,13 +801,14 @@ const sendMediaAlbum = async (
       );
     } else {
       msg = await ctx.replyWithVideo(
-        { source: fs.createReadStream(file.path) },
+        { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
         {
           caption,
           reply_to_message_id: replyToMessageId,
           supports_streaming: true,
           width: file.width,
           height: file.height,
+          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath), filename: path.basename(file.thumbnailPath) } }),
         } as any
       );
     }
@@ -787,17 +832,18 @@ const sendMediaAlbum = async (
       if (file.type === "photo") {
         return {
           type: "photo" as const,
-          media: { source: fs.createReadStream(file.path) },
+          media: { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
           caption: itemCaption,
         };
       } else {
         return {
           type: "video" as const,
-          media: { source: fs.createReadStream(file.path) },
+          media: { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
           caption: itemCaption,
           supports_streaming: true,
           width: file.width,
           height: file.height,
+          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath), filename: path.basename(file.thumbnailPath) } }),
         };
       }
     });
