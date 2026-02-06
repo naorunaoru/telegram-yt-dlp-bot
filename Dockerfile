@@ -6,8 +6,8 @@ RUN apk update
 
 # Install base dependencies and hardware acceleration libraries
 RUN apk add --no-cache python3 py3-pip make g++ ffmpeg dcron \
-    # VAAPI support
-    libva libva-utils
+    # VAAPI support (Intel)
+    libva libva-utils intel-media-driver
 
 WORKDIR /usr/src/app
 
