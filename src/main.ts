@@ -81,6 +81,7 @@ interface MediaFile {
   order?: number; // For gallery-dl: num field from metadata
   width?: number;  // Video dimensions for Telegram
   height?: number;
+  thumbnailPath?: string; // Extracted thumbnail for Telegram
 }
 
 interface DownloadResult {
@@ -230,6 +231,14 @@ const processMediaFiles = async (files: MediaFile[]): Promise<MediaFile[]> => {
       }
     }
     
+    // Extract thumbnail for videos
+    if (processedFile.type === "video") {
+      const thumbnailPath = await extractThumbnail(processedFile.path);
+      if (thumbnailPath) {
+        processedFile.thumbnailPath = thumbnailPath;
+      }
+    }
+    
     processedFiles.push(processedFile);
   }
   
@@ -276,6 +285,38 @@ const getVideoDimensions = (
     });
 
     ffprobe.on("error", () => {
+      resolve(undefined);
+    });
+  });
+};
+
+/**
+ * Extract thumbnail from video using ffmpeg
+ * Returns path to thumbnail or undefined if extraction fails
+ */
+const extractThumbnail = (videoPath: string): Promise<string | undefined> => {
+  return new Promise((resolve) => {
+    const thumbnailPath = videoPath.replace(/\.[^.]+$/, "_thumb.jpg");
+    
+    const ffmpeg = spawn("ffmpeg", [
+      "-y",
+      "-i", videoPath,
+      "-ss", "00:00:01",  // Seek to 1 second
+      "-vframes", "1",
+      "-vf", "scale=320:-1",  // 320px wide, maintain aspect ratio
+      "-q:v", "5",  // Quality (2-31, lower is better)
+      thumbnailPath,
+    ]);
+
+    ffmpeg.on("close", (code) => {
+      if (code === 0 && fs.existsSync(thumbnailPath)) {
+        resolve(thumbnailPath);
+      } else {
+        resolve(undefined);
+      }
+    });
+
+    ffmpeg.on("error", () => {
       resolve(undefined);
     });
   });
@@ -764,6 +805,7 @@ const sendMediaAlbum = async (
           supports_streaming: true,
           width: file.width,
           height: file.height,
+          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath) } }),
         } as any
       );
     }
@@ -798,6 +840,7 @@ const sendMediaAlbum = async (
           supports_streaming: true,
           width: file.width,
           height: file.height,
+          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath) } }),
         };
       }
     });
