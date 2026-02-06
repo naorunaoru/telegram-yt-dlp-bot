@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import { message } from "telegraf/filters";
 import fs from "fs";
 import path from "path";
+import { spawn } from "child_process";
 
 import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
@@ -22,15 +23,17 @@ const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
 
-// Image extensions for photo vs video detection
+// Image extensions for photo vs video detection (excluding .gif - handled separately)
 const IMAGE_EXTENSIONS = new Set([
   ".jpg",
   ".jpeg",
   ".png",
-  ".gif",
   ".webp",
   ".bmp",
 ]);
+
+// VAAPI device for hardware-accelerated encoding
+const VAAPI_DEVICE = process.env.VAAPI_DEVICE || "/dev/dri/renderD128";
 
 if (!TOKEN) {
   console.error(
@@ -109,6 +112,105 @@ const cleanupTempDir = (dirPath: string) => {
   } catch (err) {
     console.error(`Error cleaning up temp dir ${dirPath}: ${err}`);
   }
+};
+
+/**
+ * Check if a file is a GIF
+ */
+const isGifFile = (filePath: string): boolean => {
+  return path.extname(filePath).toLowerCase() === ".gif";
+};
+
+/**
+ * Convert a GIF file to MP4 video using ffmpeg
+ * Uses VAAPI hardware acceleration if available, falls back to software encoding
+ */
+const convertGifToVideo = async (gifPath: string): Promise<string> => {
+  const outputPath = gifPath.replace(/\.gif$/i, ".mp4");
+  
+  // Check if VAAPI device exists
+  const useVaapi = fs.existsSync(VAAPI_DEVICE);
+  
+  return new Promise((resolve, reject) => {
+    let ffmpegArgs: string[];
+    
+    if (useVaapi) {
+      // Hardware-accelerated encoding with VAAPI
+      ffmpegArgs = [
+        "-i", gifPath,
+        "-vaapi_device", VAAPI_DEVICE,
+        "-vf", "format=nv12,hwupload",
+        "-c:v", "h264_vaapi",
+        "-y", // Overwrite output
+        outputPath,
+      ];
+    } else {
+      // Software encoding fallback
+      ffmpegArgs = [
+        "-i", gifPath,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-y", // Overwrite output
+        outputPath,
+      ];
+    }
+    
+    console.log(`Converting GIF to MP4 (${useVaapi ? "VAAPI" : "software"}): ${gifPath}`);
+    
+    const ffmpeg = spawn("ffmpeg", ffmpegArgs);
+    let stderr = "";
+    
+    ffmpeg.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+    
+    ffmpeg.on("close", (code) => {
+      if (code === 0 && fs.existsSync(outputPath)) {
+        console.log(`GIF converted successfully: ${outputPath}`);
+        resolve(outputPath);
+      } else {
+        console.error(`ffmpeg failed with code ${code}: ${stderr}`);
+        reject(new Error(`GIF conversion failed: ${stderr.slice(-200)}`));
+      }
+    });
+    
+    ffmpeg.on("error", (err) => {
+      reject(new Error(`ffmpeg spawn error: ${err.message}`));
+    });
+  });
+};
+
+/**
+ * Process media files: convert GIFs to MP4 for better Telegram compatibility
+ * Returns updated file list with converted paths and types
+ */
+const processMediaFiles = async (files: MediaFile[]): Promise<MediaFile[]> => {
+  const processedFiles: MediaFile[] = [];
+  
+  for (const file of files) {
+    if (isGifFile(file.path)) {
+      try {
+        const mp4Path = await convertGifToVideo(file.path);
+        const stats = fs.statSync(mp4Path);
+        processedFiles.push({
+          ...file,
+          path: mp4Path,
+          type: "video",
+          size: stats.size,
+        });
+      } catch (err) {
+        console.error(`Failed to convert GIF, using original: ${err}`);
+        // Fall back to original file (will be sent as static image)
+        processedFiles.push(file);
+      }
+    } else {
+      processedFiles.push(file);
+    }
+  }
+  
+  return processedFiles;
 };
 
 /**
@@ -615,8 +717,11 @@ bot.on(message("text"), async (ctx) => {
 
       const result = await processUrl(ctx, url, pattern, tempDir);
 
+      // Convert GIFs to MP4 for proper animation support
+      const processedFiles = await processMediaFiles(result.files);
+
       // Filter by Telegram limits
-      const validFiles = filterByTelegramLimits(result.files, ctx);
+      const validFiles = filterByTelegramLimits(processedFiles, ctx);
 
       if (validFiles.length === 0) {
         if (isVerbose(ctx)) {
@@ -682,6 +787,9 @@ bot.on(message("text"), async (ctx) => {
         // Group files into albums
         const files = validItems.map((item) => item.file);
 
+        // Convert GIFs to MP4 for proper animation support
+        const processedFiles = await processMediaFiles(files);
+
         // Use first item for caption
         const firstItem = validItems[0];
         const caption = buildCaption(
@@ -690,7 +798,7 @@ bot.on(message("text"), async (ctx) => {
           firstItem.url
         );
 
-        await sendMediaAlbum(ctx, files, ctx.message.message_id, caption);
+        await sendMediaAlbum(ctx, processedFiles, ctx.message.message_id, caption);
       }
 
       // Report failures
