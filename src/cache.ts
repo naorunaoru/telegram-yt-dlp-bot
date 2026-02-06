@@ -36,11 +36,26 @@ export interface SetCachedMediaParams {
 }
 
 let db: Database.Database | null = null;
+let writeCount = 0;
+let maxEntries = 100000;
+let evictEveryNWrites = 100;
+
+/**
+ * Cache configuration options
+ */
+export interface CacheConfig {
+  dbPath: string;
+  maxEntries?: number;
+  evictEveryNWrites?: number;
+}
 
 /**
  * Initialize the cache database, creating tables if they don't exist
  */
-export function initCache(dbPath: string): void {
+export function initCache(config: CacheConfig): void {
+  const dbPath = config.dbPath;
+  maxEntries = config.maxEntries ?? 100000;
+  evictEveryNWrites = config.evictEveryNWrites ?? 100;
   // Create data directory if it doesn't exist
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
@@ -199,6 +214,13 @@ export function setCachedMedia(params: SetCachedMediaParams): void {
   });
 
   transaction();
+
+  // Track writes and trigger eviction periodically
+  writeCount++;
+  if (writeCount >= evictEveryNWrites) {
+    writeCount = 0;
+    evictOldEntries(maxEntries);
+  }
 }
 
 /**

@@ -14,7 +14,6 @@ import {
   initCache,
   getCachedMedia,
   setCachedMedia,
-  evictOldEntries,
   CachedFile,
   CachedEntry,
 } from "./cache";
@@ -30,6 +29,7 @@ const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 // Cache configuration
 const CACHE_DB_PATH = process.env.CACHE_DB_PATH || "./data/cache.db";
 const CACHE_MAX_ENTRIES = parseInt(process.env.CACHE_MAX_ENTRIES || "100000", 10);
+const CACHE_EVICT_WRITES = parseInt(process.env.CACHE_EVICT_WRITES || "100", 10);
 
 // Telegram file size limits
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024; // 10MB
@@ -903,7 +903,6 @@ bot.on(message("text"), async (ctx) => {
             caption,
             metadata: result.metadata,
           });
-          evictOldEntries(CACHE_MAX_ENTRIES);
           console.log(formatLog(ctx, `Cached ${extractedFiles.length} files for ${url}`));
         } catch (cacheError: any) {
           console.error(formatLog(ctx, `Cache write failed: ${cacheError.message}`));
@@ -1029,7 +1028,11 @@ bot.on(message("text"), async (ctx) => {
 const initializeBot = async () => {
   // Initialize cache
   try {
-    initCache(CACHE_DB_PATH);
+    initCache({
+      dbPath: CACHE_DB_PATH,
+      maxEntries: CACHE_MAX_ENTRIES,
+      evictEveryNWrites: CACHE_EVICT_WRITES,
+    });
   } catch (err) {
     console.error("Failed to initialize cache:", err);
     // Continue without cache - it's not critical

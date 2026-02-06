@@ -32,28 +32,28 @@ afterEach(() => {
 
 describe("initCache", () => {
   it("creates database and tables", () => {
-    initCache(TEST_DB_PATH);
+    initCache({ dbPath: TEST_DB_PATH });
     expect(fs.existsSync(TEST_DB_PATH)).toBe(true);
   });
 
   it("creates data directory if it doesn't exist", () => {
     const nestedPath = "./test-data/nested/deep/cache.db";
-    initCache(nestedPath);
+    initCache({ dbPath: nestedPath });
     expect(fs.existsSync(nestedPath)).toBe(true);
     closeCache();
     fs.rmSync("./test-data/nested", { recursive: true, force: true });
   });
 
   it("can be called multiple times without error", () => {
-    initCache(TEST_DB_PATH);
-    initCache(TEST_DB_PATH);
+    initCache({ dbPath: TEST_DB_PATH });
+    initCache({ dbPath: TEST_DB_PATH });
     expect(fs.existsSync(TEST_DB_PATH)).toBe(true);
   });
 });
 
 describe("setCachedMedia and getCachedMedia", () => {
   beforeEach(() => {
-    initCache(TEST_DB_PATH);
+    initCache({ dbPath: TEST_DB_PATH });
   });
 
   it("stores and retrieves single file", () => {
@@ -176,7 +176,7 @@ describe("setCachedMedia and getCachedMedia", () => {
 
 describe("evictOldEntries", () => {
   beforeEach(() => {
-    initCache(TEST_DB_PATH);
+    initCache({ dbPath: TEST_DB_PATH });
   });
 
   it("does nothing when under limit", () => {
@@ -270,7 +270,7 @@ describe("evictOldEntries", () => {
 
 describe("getCacheStats", () => {
   beforeEach(() => {
-    initCache(TEST_DB_PATH);
+    initCache({ dbPath: TEST_DB_PATH });
   });
 
   it("returns zero counts for empty cache", () => {
@@ -321,7 +321,7 @@ describe("error handling", () => {
 
 describe("file_type values", () => {
   beforeEach(() => {
-    initCache(TEST_DB_PATH);
+    initCache({ dbPath: TEST_DB_PATH });
   });
 
   it("stores and retrieves photo type", () => {
