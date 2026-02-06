@@ -149,18 +149,21 @@ const convertGifToVideo = async (gifPath: string): Promise<string> => {
     
     if (useVaapi) {
       // Hardware-accelerated encoding with VAAPI
+      // Scale to even dimensions (required by H.264) before hwupload
       ffmpegArgs = [
         "-i", gifPath,
         "-vaapi_device", VAAPI_DEVICE,
-        "-vf", "format=nv12,hwupload",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=nv12,hwupload",
         "-c:v", "h264_vaapi",
         "-y", // Overwrite output
         outputPath,
       ];
     } else {
       // Software encoding fallback
+      // Scale to even dimensions (required by H.264)
       ffmpegArgs = [
         "-i", gifPath,
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
@@ -790,7 +793,7 @@ const sendMediaAlbum = async (
 
     if (file.type === "photo") {
       msg = await ctx.replyWithPhoto(
-        { source: fs.createReadStream(file.path) },
+        { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
         {
           caption,
           reply_to_message_id: replyToMessageId,
@@ -798,14 +801,14 @@ const sendMediaAlbum = async (
       );
     } else {
       msg = await ctx.replyWithVideo(
-        { source: fs.createReadStream(file.path) },
+        { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
         {
           caption,
           reply_to_message_id: replyToMessageId,
           supports_streaming: true,
           width: file.width,
           height: file.height,
-          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath) } }),
+          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath), filename: path.basename(file.thumbnailPath) } }),
         } as any
       );
     }
@@ -829,18 +832,18 @@ const sendMediaAlbum = async (
       if (file.type === "photo") {
         return {
           type: "photo" as const,
-          media: { source: fs.createReadStream(file.path) },
+          media: { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
           caption: itemCaption,
         };
       } else {
         return {
           type: "video" as const,
-          media: { source: fs.createReadStream(file.path) },
+          media: { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
           caption: itemCaption,
           supports_streaming: true,
           width: file.width,
           height: file.height,
-          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath) } }),
+          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath), filename: path.basename(file.thumbnailPath) } }),
         };
       }
     });
