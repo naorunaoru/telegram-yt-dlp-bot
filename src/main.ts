@@ -195,34 +195,90 @@ const convertGifToVideo = async (gifPath: string): Promise<string> => {
 };
 
 /**
- * Process media files: convert GIFs to MP4 for better Telegram compatibility
+ * Process media files: convert GIFs to MP4 and fill in missing video dimensions
  * Returns updated file list with converted paths and types
  */
 const processMediaFiles = async (files: MediaFile[]): Promise<MediaFile[]> => {
   const processedFiles: MediaFile[] = [];
   
   for (const file of files) {
+    let processedFile = { ...file };
+    
+    // Convert GIFs to MP4
     if (isGifFile(file.path)) {
       try {
         const mp4Path = await convertGifToVideo(file.path);
         const stats = fs.statSync(mp4Path);
-        processedFiles.push({
-          ...file,
+        processedFile = {
+          ...processedFile,
           path: mp4Path,
           type: "video",
           size: stats.size,
-        });
+        };
       } catch (err) {
         console.error(`Failed to convert GIF, using original: ${err}`);
         // Fall back to original file (will be sent as static image)
-        processedFiles.push(file);
       }
-    } else {
-      processedFiles.push(file);
     }
+    
+    // Fill in missing dimensions for videos using ffprobe
+    if (processedFile.type === "video" && (!processedFile.width || !processedFile.height)) {
+      const dimensions = await getVideoDimensions(processedFile.path);
+      if (dimensions) {
+        processedFile.width = dimensions.width;
+        processedFile.height = dimensions.height;
+      }
+    }
+    
+    processedFiles.push(processedFile);
   }
   
   return processedFiles;
+};
+
+/**
+ * Get video dimensions using ffprobe
+ * Returns { width, height } or undefined if unable to determine
+ */
+const getVideoDimensions = (
+  filePath: string
+): Promise<{ width: number; height: number } | undefined> => {
+  return new Promise((resolve) => {
+    const ffprobe = spawn("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height",
+      "-of", "json",
+      filePath,
+    ]);
+
+    let stdout = "";
+    ffprobe.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+
+    ffprobe.on("close", (code) => {
+      if (code !== 0) {
+        resolve(undefined);
+        return;
+      }
+      try {
+        const data = JSON.parse(stdout);
+        const stream = data.streams?.[0];
+        if (stream?.width && stream?.height) {
+          resolve({ width: stream.width, height: stream.height });
+        } else {
+          resolve(undefined);
+        }
+      } catch {
+        resolve(undefined);
+      }
+    });
+
+    ffprobe.on("error", () => {
+      resolve(undefined);
+    });
+  });
 };
 
 /**
