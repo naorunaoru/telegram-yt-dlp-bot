@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bot Admin</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--tg-theme-bg-color, #fff);
+      color: var(--tg-theme-text-color, #000);
+      padding: 12px;
+      line-height: 1.4;
+    }
+
+    .card {
+      background: var(--tg-theme-secondary-bg-color, #f4f4f5);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    h1 { font-size: 20px; margin-bottom: 12px; }
+    h2 { font-size: 16px; margin-bottom: 8px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .stat {
+      background: var(--tg-theme-secondary-bg-color, #f4f4f5);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--tg-theme-link-color, #2481cc);
+    }
+
+    .stat-label {
+      font-size: 11px;
+      opacity: 0.6;
+      margin-top: 2px;
+    }
+
+    .chat-item, .activity-item {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--tg-theme-bg-color, #fff);
+      font-size: 13px;
+    }
+    .chat-item:last-child, .activity-item:last-child { border-bottom: none; }
+
+    .chat-name { font-weight: 600; }
+    .chat-meta { opacity: 0.6; font-size: 12px; }
+
+    .domain-bar-container { margin-bottom: 6px; }
+    .domain-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+    .domain-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--tg-theme-link-color, #2481cc);
+      transition: width 0.3s;
+    }
+
+    .daily-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 80px;
+      padding-top: 8px;
+    }
+    .daily-bar {
+      flex: 1;
+      background: var(--tg-theme-link-color, #2481cc);
+      border-radius: 2px 2px 0 0;
+      min-height: 2px;
+      position: relative;
+    }
+    .daily-bar:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--tg-theme-text-color, #000);
+      color: var(--tg-theme-bg-color, #fff);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .status-ok { color: #34c759; }
+    .status-fail { color: #ff3b30; }
+
+    .url-text {
+      word-break: break-all;
+      color: var(--tg-theme-link-color, #2481cc);
+      font-size: 12px;
+    }
+
+    .loading { text-align: center; padding: 40px; opacity: 0.5; }
+    .error { color: #ff3b30; text-align: center; padding: 20px; }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+    }
+    .tab {
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      background: var(--tg-theme-secondary-bg-color, #f4f4f5);
+      border: none;
+      color: var(--tg-theme-text-color, #000);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tab.active {
+      background: var(--tg-theme-link-color, #2481cc);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="loading">Loading...</div>
+  </div>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
+
+    const initData = tg?.initData || '';
+
+    async function api(endpoint) {
+      const res = await fetch(endpoint, {
+        headers: { 'Authorization': initData }
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json();
+    }
+
+    function timeAgo(ts) {
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
+
+    function truncUrl(url, max = 50) {
+      return url.length > max ? url.substring(0, max) + '…' : url;
+    }
+
+    let currentTab = 'overview';
+    let data = {};
+
+    async function loadData() {
+      try {
+        const [stats, chats, activity, daily, domains] = await Promise.all([
+          api('/api/stats'),
+          api('/api/chats'),
+          api('/api/activity'),
+          api('/api/activity/daily'),
+          api('/api/activity/domains'),
+        ]);
+        data = { stats, chats, activity, daily, domains };
+        render();
+      } catch (e) {
+        document.getElementById('app').innerHTML =
+          `<div class="error">Failed to load: ${e.message}</div>`;
+      }
+    }
+
+    function render() {
+      const s = data.stats || {};
+      let html = `
+        <h1>📊 Bot Dashboard</h1>
+        <div class="stats-grid">
+          <div class="stat"><div class="stat-value">${s.total_downloads || 0}</div><div class="stat-label">Downloads</div></div>
+          <div class="stat"><div class="stat-value">${s.active_chats || 0}</div><div class="stat-label">Chats</div></div>
+          <div class="stat"><div class="stat-value">${s.success_rate || 0}%</div><div class="stat-label">Success</div></div>
+        </div>
+        <div class="tabs">
+          <button class="tab ${currentTab === 'overview' ? 'active' : ''}" onclick="switchTab('overview')">Overview</button>
+          <button class="tab ${currentTab === 'chats' ? 'active' : ''}" onclick="switchTab('chats')">Chats</button>
+          <button class="tab ${currentTab === 'activity' ? 'active' : ''}" onclick="switchTab('activity')">Activity</button>
+        </div>
+      `;
+
+      if (currentTab === 'overview') {
+        // Daily chart
+        const daily = data.daily || [];
+        const maxDaily = Math.max(...daily.map(d => d.total), 1);
+        html += `<div class="card"><h2>Daily Activity (30d)</h2><div class="daily-chart">`;
+        for (const d of daily) {
+          const pct = (d.total / maxDaily * 100).toFixed(0);
+          html += `<div class="daily-bar" style="height:${Math.max(pct, 3)}%" data-tip="${d.date}: ${d.total}"></div>`;
+        }
+        if (daily.length === 0) html += `<div style="opacity:0.5;margin:auto">No data yet</div>`;
+        html += `</div></div>`;
+
+        // Domains
+        const domains = data.domains || [];
+        const maxDomain = domains.length > 0 ? domains[0].total : 1;
+        html += `<div class="card"><h2>Downloads by Domain</h2>`;
+        for (const d of domains) {
+          const pct = (d.total / maxDomain * 100).toFixed(0);
+          html += `<div class="domain-bar-container">
+            <div class="domain-label"><span>${d.domain}</span><span>${d.total} (${d.successful} ok)</span></div>
+            <div class="domain-bar" style="width:${pct}%"></div>
+          </div>`;
+        }
+        if (domains.length === 0) html += `<div style="opacity:0.5">No data yet</div>`;
+        html += `</div>`;
+
+        // Cache stats
+        if (s.cache) {
+          html += `<div class="card"><h2>Cache</h2>
+            <div style="font-size:13px">${s.cache.entryCount} entries, ${s.cache.fileCount} files</div>
+          </div>`;
+        }
+      } else if (currentTab === 'chats') {
+        html += `<div class="card">`;
+        const chats = data.chats || [];
+        for (const c of chats) {
+          html += `<div class="chat-item">
+            <div class="chat-name">${escHtml(c.chat_title || String(c.chat_id))}</div>
+            <div class="chat-meta">${c.chat_type} · ${c.download_count} downloads · ${timeAgo(c.last_active)}</div>
+          </div>`;
+        }
+        if (chats.length === 0) html += `<div style="opacity:0.5">No chats yet</div>`;
+        html += `</div>`;
+      } else if (currentTab === 'activity') {
+        html += `<div class="card">`;
+        const items = (data.activity || []).slice(0, 20);
+        for (const a of items) {
+          html += `<div class="activity-item">
+            <div><span class="${a.success ? 'status-ok' : 'status-fail'}">${a.success ? '✓' : '✗'}</span>
+            ${escHtml(a.chat_title || String(a.chat_id))} · ${timeAgo(a.timestamp)}
+            ${a.file_count > 0 ? ' · ' + a.file_count + ' files' : ''}</div>
+            <div class="url-text">${escHtml(truncUrl(a.url))}</div>
+            ${a.error_message ? '<div style="color:#ff3b30;font-size:11px">' + escHtml(a.error_message.substring(0, 100)) + '</div>' : ''}
+          </div>`;
+        }
+        if (items.length === 0) html += `<div style="opacity:0.5">No activity yet</div>`;
+        html += `</div>`;
+      }
+
+      document.getElementById('app').innerHTML = html;
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      render();
+    }
+
+    function escHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    loadData();
+    // Auto-refresh every 30 seconds
+    setInterval(loadData, 30000);
+  </script>
+</body>
+</html>
