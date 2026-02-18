@@ -135,7 +135,7 @@ function getWebAppHtml(): string {
 /**
  * Start the admin HTTP server
  */
-export function startServer(token: string, port: number = 3000): http.Server {
+export function startServer(token: string, port: number = 49152): http.Server {
   botToken = token;
 
   const server = http.createServer((req, res) => {

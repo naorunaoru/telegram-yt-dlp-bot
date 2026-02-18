@@ -34,7 +34,7 @@ const CACHE_MAX_ENTRIES = parseInt(process.env.CACHE_MAX_ENTRIES || "100000", 10
 const CACHE_EVICT_WRITES = parseInt(process.env.CACHE_EVICT_WRITES || "100", 10);
 
 // Admin dashboard configuration
-const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || "3000", 10);
+const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || "49152", 10);
 const ADMIN_URL = process.env.ADMIN_URL;
 
 // Telegram file size limits
