@@ -17,6 +17,8 @@ import {
   CachedFile,
   CachedEntry,
 } from "./cache";
+import { initAnalytics, logEvent, trackChat } from "./analytics";
+import { startServer } from "./server";
 
 dotenv.config();
 
@@ -30,6 +32,10 @@ const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const CACHE_DB_PATH = process.env.CACHE_DB_PATH || "./data/cache.db";
 const CACHE_MAX_ENTRIES = parseInt(process.env.CACHE_MAX_ENTRIES || "100000", 10);
 const CACHE_EVICT_WRITES = parseInt(process.env.CACHE_EVICT_WRITES || "100", 10);
+
+// Admin dashboard configuration
+const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || "49152", 10);
+const ADMIN_URL = process.env.ADMIN_URL;
 
 // Telegram file size limits
 const MAX_PHOTO_SIZE = 10 * 1024 * 1024; // 10MB
@@ -70,6 +76,42 @@ const isPrivateChat = (ctx: Context): boolean => {
 
 const isVerbose = (ctx: Context): boolean => {
   return isPrivateChat(ctx) || VERBOSE_GROUPS;
+};
+
+/**
+ * Extract domain from a URL for analytics
+ */
+const extractDomain = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "unknown";
+  }
+};
+
+/**
+ * Get chat title for analytics logging
+ */
+const getChatTitle = (ctx: Context): string => {
+  const chat = ctx.chat as any;
+  return chat?.title || chat?.first_name || String(chat?.id || "unknown");
+};
+
+/**
+ * Track chat activity for analytics
+ */
+const trackChatActivity = (ctx: Context): void => {
+  try {
+    if (ctx.chat) {
+      trackChat({
+        chat_id: ctx.chat.id,
+        chat_title: getChatTitle(ctx),
+        chat_type: ctx.chat.type,
+      });
+    }
+  } catch (err) {
+    // Non-critical, don't break message processing
+  }
 };
 
 const bot = new Telegraf(TOKEN);
@@ -953,6 +995,9 @@ bot.on(message("text"), async (ctx) => {
   const matches = findAllMatches(messageText);
   if (matches.length === 0) return;
 
+  // Track chat activity for analytics
+  trackChatActivity(ctx);
+
   const tempDir = createTempDir();
 
   // Keep sending typing indicator while processing (expires after 5s)
@@ -1010,6 +1055,19 @@ bot.on(message("text"), async (ctx) => {
           console.error(formatLog(ctx, `Cache write failed: ${cacheError.message}`));
         }
       }
+
+      // Log successful download event
+      try {
+        logEvent({
+          url,
+          domain: extractDomain(url),
+          chat_id: ctx.chat!.id,
+          chat_title: getChatTitle(ctx),
+          user_id: ctx.from!.id,
+          success: true,
+          file_count: validFiles.length,
+        });
+      } catch (e) { /* non-critical */ }
     } else {
       // Multiple URLs
       console.log(formatLog(ctx, `Processing ${matches.length} URLs`));
@@ -1079,6 +1137,35 @@ bot.on(message("text"), async (ctx) => {
         await sendMediaAlbum(ctx, processedFiles, ctx.message.message_id, caption);
       }
 
+      // Log events for each URL result
+      results.forEach((promiseResult, index) => {
+        try {
+          const matchUrl = matches[index].url;
+          if (promiseResult.status === "fulfilled") {
+            logEvent({
+              url: matchUrl,
+              domain: extractDomain(matchUrl),
+              chat_id: ctx.chat!.id,
+              chat_title: getChatTitle(ctx),
+              user_id: ctx.from!.id,
+              success: true,
+              file_count: promiseResult.value.files.length,
+            });
+          } else {
+            logEvent({
+              url: matchUrl,
+              domain: extractDomain(matchUrl),
+              chat_id: ctx.chat!.id,
+              chat_title: getChatTitle(ctx),
+              user_id: ctx.from!.id,
+              success: false,
+              file_count: 0,
+              error_message: String(promiseResult.reason?.message || promiseResult.reason).substring(0, 500),
+            });
+          }
+        } catch (e) { /* non-critical */ }
+      });
+
       // Report failures
       const failedDownloads = results
         .map((result, index) => ({ result, index }))
@@ -1107,6 +1194,22 @@ bot.on(message("text"), async (ctx) => {
     }
   } catch (error: any) {
     console.error(formatLog(ctx, `Error: ${error}`));
+
+    // Log failed download for single-URL case
+    if (matches.length === 1) {
+      try {
+        logEvent({
+          url: matches[0].url,
+          domain: extractDomain(matches[0].url),
+          chat_id: ctx.chat!.id,
+          chat_title: getChatTitle(ctx),
+          user_id: ctx.from!.id,
+          success: false,
+          file_count: 0,
+          error_message: String(error.message || error).substring(0, 500),
+        });
+      } catch (e) { /* non-critical */ }
+    }
 
     if (isPrivateChat(ctx)) {
       const errorMessage = error.message || String(error);
@@ -1140,10 +1243,40 @@ const initializeBot = async () => {
     // Continue without cache - it's not critical
   }
 
+  // Initialize analytics
+  try {
+    initAnalytics(CACHE_DB_PATH);
+  } catch (err) {
+    console.error("Failed to initialize analytics:", err);
+  }
+
+  // Start admin HTTP server
+  try {
+    startServer(TOKEN!, ADMIN_PORT);
+  } catch (err) {
+    console.error("Failed to start admin server:", err);
+  }
+
   await bot.launch().catch((err) => {
     console.error("Error starting bot:", err);
     process.exit(1);
   });
+
+  // Register Mini App menu button if ADMIN_URL is configured
+  if (ADMIN_URL) {
+    try {
+      await bot.telegram.setChatMenuButton({
+        menuButton: {
+          type: "web_app",
+          text: "Admin",
+          web_app: { url: ADMIN_URL },
+        },
+      });
+      console.log(`Mini App menu button set to ${ADMIN_URL}`);
+    } catch (err) {
+      console.error("Failed to set menu button:", err);
+    }
+  }
 
   console.log("Bot is running!");
 };
