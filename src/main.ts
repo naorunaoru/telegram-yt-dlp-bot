@@ -446,6 +446,7 @@ const downloadWithGalleryDl = async (
     // --write-metadata writes .json files alongside downloads for metadata
     const galleryDl = execGalleryDl(
       [
+        "-q",
         "--config",
         "/etc/gallery-dl.conf",
         "-d",
