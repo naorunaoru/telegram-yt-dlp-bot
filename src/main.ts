@@ -9,6 +9,7 @@ import { spawn } from "child_process";
 
 import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
+import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
 import { resolveRedditShareUrl } from "./helpers/reddit";
 import { VideoMetadata } from "./types";
 import {
@@ -450,6 +451,7 @@ const downloadWithGalleryDl = async (
         "-q",
         "--config",
         "/etc/gallery-dl.conf",
+        ...getGalleryDlCliOptionsFromEnv(),
         "-d",
         tempDir,
         "--Print",
