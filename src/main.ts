@@ -9,6 +9,7 @@ import { spawn } from "child_process";
 
 import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
+import { resolveRedditShareUrl } from "./helpers/reddit";
 import { VideoMetadata } from "./types";
 import {
   initCache,
@@ -914,22 +915,27 @@ const processUrl = async (
   pattern: (typeof patterns)[0],
   tempDir: string
 ): Promise<DownloadResult> => {
+  const normalizedUrl = await resolveRedditShareUrl(url);
+  if (normalizedUrl !== url) {
+    console.log(formatLog(ctx, `Resolved Reddit share URL: ${url} -> ${normalizedUrl}`));
+  }
+
   // Try gallery-dl first
   try {
-    const result = await downloadWithGalleryDl(ctx, url, tempDir);
+    const result = await downloadWithGalleryDl(ctx, normalizedUrl, tempDir);
     if (result.files.length > 0) {
       return result;
     }
   } catch (error: any) {
     console.log(
-      formatLog(ctx, `gallery-dl failed for ${url}: ${error.message}`)
+      formatLog(ctx, `gallery-dl failed for ${normalizedUrl}: ${error.message}`)
     );
     // Continue to yt-dlp fallback
   }
 
   // Fall back to yt-dlp
-  console.log(formatLog(ctx, `Falling back to yt-dlp for ${url}`));
-  const { path: videoPath, metadata } = await processVideo(ctx, url, pattern, tempDir);
+  console.log(formatLog(ctx, `Falling back to yt-dlp for ${normalizedUrl}`));
+  const { path: videoPath, metadata } = await processVideo(ctx, normalizedUrl, pattern, tempDir);
 
   const stats = fs.statSync(videoPath);
   return {
