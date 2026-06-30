@@ -86,6 +86,7 @@ describe("execYtDlp event parsing", () => {
         resolve();
       });
 
+      proc.stderr.emit("data", Buffer.from("ERROR: Sign in to confirm you're not a bot\n"));
       proc.emit("close", 1);
     }));
 
@@ -119,6 +120,22 @@ describe("execYtDlp event parsing", () => {
 
       // Simulate data arriving in one chunk with multiple lines
       proc.stdout.push("[download] 100%\n[filename] /tmp/out.mp4\n");
+    }));
+
+  it("includes meaningful stderr details in error messages", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execYtDlp(["https://example.com"]);
+      const proc = getLastProcess();
+
+      emitter.on("error", (error: Error) => {
+        expect(error.message).toBe(
+          "yt-dlp exited with code 1: Instagram sent an empty media response"
+        );
+        resolve();
+      });
+
+      proc.stderr.emit("data", Buffer.from("ERROR: Instagram sent an empty media response\n"));
+      proc.emit("close", 1);
     }));
 
   it("exposes kill method", () => {

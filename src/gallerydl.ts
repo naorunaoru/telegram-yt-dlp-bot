@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { EventEmitter } from "events";
+import { summarizeProcessFailure } from "./helpers/downloader-errors";
 
 /**
  * Event emitter for gallery-dl execution, mirrors YtDlpEventEmitter interface
@@ -47,6 +48,8 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
 
   let stdoutBuffer = "";
   let stderrBuffer = "";
+  const stdoutLines: string[] = [];
+  const stderrLines: string[] = [];
 
   // Handle stdout
   process.stdout.on("data", (data: Buffer) => {
@@ -117,6 +120,7 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
       }
 
       // Emit other output as generic stdout events
+      stdoutLines.push(line);
       emitter.emit("galleryDlEvent", "stdout", line);
     }
   });
@@ -129,6 +133,7 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
 
     for (const line of lines) {
       if (line.trim()) {
+        stderrLines.push(line);
         emitter.emit("galleryDlEvent", "stderr", line);
       }
     }
@@ -145,7 +150,10 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
       clearTimeout(timeoutId);
     }
     if (code !== 0 && code !== null) {
-      emitter.emit("error", new Error(`gallery-dl exited with code ${code}`));
+      emitter.emit(
+        "error",
+        new Error(summarizeProcessFailure("gallery-dl", code, stderrLines, stdoutLines))
+      );
     } else {
       emitter.emit("close");
     }

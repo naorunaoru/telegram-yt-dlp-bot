@@ -137,10 +137,13 @@ describe("execGalleryDl event parsing", () => {
       const proc = getLastProcess();
 
       emitter.on("error", (error: Error) => {
-        expect(error.message).toContain("exited with code 1");
+        expect(error.message).toBe(
+          "gallery-dl exited with code 1: [site][error] HTTP Error 403: Forbidden"
+        );
         resolve();
       });
 
+      proc.stderr.emit("data", Buffer.from("[site][error] HTTP Error 403: Forbidden\n"));
       proc.emit("close", 1);
     }));
 

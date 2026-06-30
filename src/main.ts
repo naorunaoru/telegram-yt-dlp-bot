@@ -11,6 +11,7 @@ import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
 import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
 import { resolveRedditShareUrl } from "./helpers/reddit";
+import { explainDownloadFailure } from "./helpers/downloader-errors";
 import { VideoMetadata } from "./types";
 import {
   initCache,
@@ -923,6 +924,8 @@ const processUrl = async (
     console.log(formatLog(ctx, `Resolved Reddit share URL: ${url} -> ${normalizedUrl}`));
   }
 
+  let galleryDlError: Error | undefined;
+
   // Try gallery-dl first
   try {
     const result = await downloadWithGalleryDl(ctx, normalizedUrl, tempDir);
@@ -930,30 +933,46 @@ const processUrl = async (
       return result;
     }
   } catch (error: any) {
+    galleryDlError = error instanceof Error ? error : new Error(String(error));
     console.log(
-      formatLog(ctx, `gallery-dl failed for ${normalizedUrl}: ${error.message}`)
+      formatLog(ctx, `gallery-dl failed for ${normalizedUrl}: ${galleryDlError.message}`)
     );
     // Continue to yt-dlp fallback
   }
 
   // Fall back to yt-dlp
   console.log(formatLog(ctx, `Falling back to yt-dlp for ${normalizedUrl}`));
-  const { path: videoPath, metadata } = await processVideo(ctx, normalizedUrl, pattern, tempDir);
 
-  const stats = fs.statSync(videoPath);
-  return {
-    files: [
-      {
-        path: videoPath,
-        type: getMediaType(videoPath),
-        size: stats.size,
-        width: metadata.width,
-        height: metadata.height,
-      },
-    ],
-    metadata,
-    // yt-dlp caption comes from formatMetadata in the caller
-  };
+  try {
+    const { path: videoPath, metadata } = await processVideo(ctx, normalizedUrl, pattern, tempDir);
+
+    const stats = fs.statSync(videoPath);
+    return {
+      files: [
+        {
+          path: videoPath,
+          type: getMediaType(videoPath),
+          size: stats.size,
+          width: metadata.width,
+          height: metadata.height,
+        },
+      ],
+      metadata,
+      // yt-dlp caption comes from formatMetadata in the caller
+    };
+  } catch (error: any) {
+    const ytDlpError = error instanceof Error ? error : new Error(String(error));
+    const preferredError = explainDownloadFailure(normalizedUrl, ytDlpError.message);
+
+    if (galleryDlError) {
+      const galleryHint = explainDownloadFailure(normalizedUrl, galleryDlError.message);
+      if (galleryHint !== preferredError) {
+        throw new Error(`${preferredError}\nFallback details: ${galleryHint}`);
+      }
+    }
+
+    throw new Error(preferredError);
+  }
 };
 
 /**
