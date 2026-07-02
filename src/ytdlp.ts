@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { EventEmitter } from "events";
+import { summarizeProcessFailure } from "./helpers/downloader-errors";
 
 /**
  * Event emitter for yt-dlp execution, mimics yt-dlp-wrap's interface
@@ -27,6 +28,8 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
 
   let stdoutBuffer = "";
   let stderrBuffer = "";
+  const stdoutLines: string[] = [];
+  const stderrLines: string[] = [];
 
   // Handle stdout
   process.stdout.on("data", (data: Buffer) => {
@@ -50,6 +53,7 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
       }
 
       if (line.trim()) {
+        stdoutLines.push(line);
         // Emit other output as generic events
         emitter.emit("ytDlpEvent", "stdout", line);
       }
@@ -64,6 +68,7 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
 
     for (const line of lines) {
       if (line.trim()) {
+        stderrLines.push(line);
         emitter.emit("ytDlpEvent", "stderr", line);
       }
     }
@@ -77,7 +82,10 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
   // Handle process exit
   process.on("close", (code: number | null) => {
     if (code !== 0 && code !== null) {
-      emitter.emit("error", new Error(`yt-dlp exited with code ${code}`));
+      emitter.emit(
+        "error",
+        new Error(summarizeProcessFailure("yt-dlp", code, stderrLines, stdoutLines))
+      );
     } else {
       emitter.emit("close");
     }
