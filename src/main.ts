@@ -12,6 +12,7 @@ import { truncateWithEllipsis } from "./helpers/text";
 import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
 import { resolveRedditShareUrl } from "./helpers/reddit";
 import { explainDownloadFailure } from "./helpers/downloader-errors";
+import { reactSadOnFailure } from "./helpers/reactions";
 import { VideoMetadata } from "./types";
 import {
   initCache,
@@ -1203,6 +1204,8 @@ bot.on(message("text"), async (ctx) => {
         );
 
       if (failedDownloads.length > 0) {
+        await reactSadOnFailure(ctx);
+
         if (isPrivateChat(ctx)) {
           const errorMessages = failedDownloads
             .map(({ result, index }) => {
@@ -1237,6 +1240,10 @@ bot.on(message("text"), async (ctx) => {
           error_message: String(error.message || error).substring(0, 500),
         });
       } catch (e) { /* non-critical */ }
+    }
+
+    if (matches.length === 1) {
+      await reactSadOnFailure(ctx);
     }
 
     if (isPrivateChat(ctx)) {
