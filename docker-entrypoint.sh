@@ -7,11 +7,11 @@ set -e
 echo "Starting telegram-grabber-bot..."
 
 # Check if auto-update is enabled (default: true)
-DOWNLOADERS_AUTO_UPDATE=${DOWNLOADERS_AUTO_UPDATE:-true}
+DOWNLOADERS_AUTO_UPDATE=${DOWNLOADERS_AUTO_UPDATE:-${YTDLP_AUTO_UPDATE:-true}}
 
 if [ "$DOWNLOADERS_AUTO_UPDATE" = "true" ]; then
     # Set default cron schedule (every 24 hours at minute 0)
-    DOWNLOADERS_UPDATE_CRON=${DOWNLOADERS_UPDATE_CRON:-"0 */24 * * *"}
+    DOWNLOADERS_UPDATE_CRON=${DOWNLOADERS_UPDATE_CRON:-${YTDLP_UPDATE_CRON:-"0 */24 * * *"}}
 
     echo "Setting up cron for downloader updates with schedule: $DOWNLOADERS_UPDATE_CRON"
 

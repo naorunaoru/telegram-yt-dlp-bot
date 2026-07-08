@@ -44,7 +44,17 @@ describe("explainDownloadFailure", () => {
     );
 
     expect(message).toContain("Instagram is rejecting anonymous downloads");
-    expect(message).toContain("logged-in cookies");
+    expect(message).toContain("DOWNLOADER_COOKIES_FILE");
+  });
+
+  it("turns Reddit auth failures into a user-facing explanation", () => {
+    const message = explainDownloadFailure(
+      "https://www.reddit.com/r/shitposting/comments/1uqg173/post/",
+      "yt-dlp exited with code 1: Account authentication is required. Use --cookies"
+    );
+
+    expect(message).toContain("Reddit is requiring account authentication");
+    expect(message).toContain("GDL_REDDIT_REFRESH_TOKEN");
   });
 
   it("passes unrelated errors through", () => {

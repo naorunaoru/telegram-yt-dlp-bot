@@ -18,3 +18,7 @@ services:
       - HW_ACCEL=none
       - MAX_RESOLUTION=720
       - VERBOSE_GROUPS=false
+    # Mount exported browser cookies here and set:
+    # DOWNLOADER_COOKIES_FILE=/run/secrets/downloader-cookies.txt
+    # volumes:
+    #   - ./secrets/downloader-cookies.txt:/run/secrets/downloader-cookies.txt:ro

@@ -31,6 +31,46 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
 
+  const handleStdoutLine = (line: string) => {
+    // Parse [filename] marker from --print "after_move:[filename] %(filepath)s"
+    const filenameMatch = line.match(/^\[filename\]\s+(.+)$/);
+    if (filenameMatch) {
+      emitter.emit("ytDlpEvent", "filename", filenameMatch[1]);
+      return;
+    }
+
+    // Parse [metadata] marker from --print "before_dl:[metadata] %()j"
+    const metadataMatch = line.match(/^\[metadata\]\s+(.+)$/);
+    if (metadataMatch) {
+      emitter.emit("ytDlpEvent", "metadata", metadataMatch[1]);
+      return;
+    }
+
+    if (line.trim()) {
+      stdoutLines.push(line);
+      emitter.emit("ytDlpEvent", "stdout", line);
+    }
+  };
+
+  const handleStderrLine = (line: string) => {
+    if (line.trim()) {
+      stderrLines.push(line);
+      emitter.emit("ytDlpEvent", "stderr", line);
+    }
+  };
+
+  const flushRemainingBuffers = () => {
+    if (stdoutBuffer.trim()) {
+      handleStdoutLine(stdoutBuffer);
+      stdoutBuffer = "";
+    }
+
+    if (stderrBuffer.trim()) {
+      handleStderrLine(stderrBuffer);
+      stderrBuffer = "";
+    }
+  };
+
   // Handle stdout
   process.stdout.on("data", (data: Buffer) => {
     stdoutBuffer += data.toString();
@@ -38,25 +78,7 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
     stdoutBuffer = lines.pop() || ""; // Keep incomplete line in buffer
 
     for (const line of lines) {
-      // Parse [filename] marker from --print "after_move:[filename] %(filepath)s"
-      const filenameMatch = line.match(/^\[filename\]\s+(.+)$/);
-      if (filenameMatch) {
-        emitter.emit("ytDlpEvent", "filename", filenameMatch[1]);
-        continue;
-      }
-
-      // Parse [metadata] marker from --print "before_dl:[metadata] %()j"
-      const metadataMatch = line.match(/^\[metadata\]\s+(.+)$/);
-      if (metadataMatch) {
-        emitter.emit("ytDlpEvent", "metadata", metadataMatch[1]);
-        continue;
-      }
-
-      if (line.trim()) {
-        stdoutLines.push(line);
-        // Emit other output as generic events
-        emitter.emit("ytDlpEvent", "stdout", line);
-      }
+      handleStdoutLine(line);
     }
   });
 
@@ -67,10 +89,7 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
     stderrBuffer = lines.pop() || "";
 
     for (const line of lines) {
-      if (line.trim()) {
-        stderrLines.push(line);
-        emitter.emit("ytDlpEvent", "stderr", line);
-      }
+      handleStderrLine(line);
     }
   });
 
@@ -81,6 +100,8 @@ export function execYtDlp(args: string[]): YtDlpEventEmitter {
 
   // Handle process exit
   process.on("close", (code: number | null) => {
+    flushRemainingBuffers();
+
     if (code !== 0 && code !== null) {
       emitter.emit(
         "error",

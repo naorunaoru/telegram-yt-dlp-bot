@@ -1,12 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
-import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "../helpers/reddit.js";
+import {
+  getRedditDirectMediaUrls,
+  getRedditFetchHeadersFromEnv,
+  resolveRedditShareUrl,
+} from "../helpers/reddit.js";
 
 describe("resolveRedditShareUrl", () => {
   it("returns non-share reddit URLs unchanged", async () => {
     const fetchMock = vi.fn();
     const url = "https://www.reddit.com/r/funny/comments/abc123/some_title";
 
-    await expect(resolveRedditShareUrl(url, fetchMock as any)).resolves.toBe(url);
+    await expect(resolveRedditShareUrl(url, fetchMock as any, {})).resolves.toBe(url);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -18,7 +22,8 @@ describe("resolveRedditShareUrl", () => {
     await expect(
       resolveRedditShareUrl(
         "https://www.reddit.com/r/funny/s/AbCdEfGhIj",
-        fetchMock as any
+        fetchMock as any,
+        {}
       )
     ).resolves.toBe("https://www.reddit.com/r/funny/comments/abc123/some_title/");
     expect(fetchMock).toHaveBeenCalledWith(
@@ -31,7 +36,47 @@ describe("resolveRedditShareUrl", () => {
     const fetchMock = vi.fn().mockResolvedValue({ url: "" });
     const url = "https://www.reddit.com/r/funny/s/AbCdEfGhIj";
 
-    await expect(resolveRedditShareUrl(url, fetchMock as any)).resolves.toBe(url);
+    await expect(resolveRedditShareUrl(url, fetchMock as any, {})).resolves.toBe(url);
+  });
+
+  it("passes configured reddit user-agent to share URL fetches", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      url: "https://www.reddit.com/r/funny/comments/abc123/some_title/",
+    });
+
+    await resolveRedditShareUrl(
+      "https://www.reddit.com/r/funny/s/AbCdEfGhIj",
+      fetchMock as any,
+      {
+        GDL_REDDIT_USER_AGENT: "Python:mediarelaybot:v1.0 (by /u/test)",
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://www.reddit.com/r/funny/s/AbCdEfGhIj",
+      {
+        redirect: "follow",
+        headers: {
+          "user-agent": "Python:mediarelaybot:v1.0 (by /u/test)",
+        },
+      }
+    );
+  });
+});
+
+describe("getRedditFetchHeadersFromEnv", () => {
+  it("returns undefined without a configured user-agent", () => {
+    expect(getRedditFetchHeadersFromEnv({})).toBeUndefined();
+  });
+
+  it("returns the configured user-agent", () => {
+    expect(
+      getRedditFetchHeadersFromEnv({
+        GDL_REDDIT_USER_AGENT: "Python:mediarelaybot:v1.0 (by /u/test)",
+      })
+    ).toEqual({
+      "user-agent": "Python:mediarelaybot:v1.0 (by /u/test)",
+    });
   });
 });
 

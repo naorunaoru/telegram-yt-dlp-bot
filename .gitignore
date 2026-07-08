@@ -9,5 +9,10 @@ yt-dlp
 # Cache database
 data/
 
+# Local credentials and exported browser cookies
+secrets/
+*.cookies.txt
+cookies.txt
+
 # Test data
 test-data/

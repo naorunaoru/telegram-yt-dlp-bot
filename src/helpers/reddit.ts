@@ -11,12 +11,24 @@ const stripTrackingParams = (url: string): string => {
   return parsed.toString();
 };
 
+const trimToUndefined = (value?: string): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+};
+
 const getCookieHeader = (response: Response): string => {
   const setCookies = response.headers.getSetCookie?.() || [];
   return setCookies.map((cookie) => cookie.split(";", 1)[0]).join("; ");
 };
 
 const decodeHtmlEntities = (value: string): string => value.replace(/&amp;/g, "&");
+
+export const getRedditFetchHeadersFromEnv = (
+  env: Record<string, string | undefined> = process.env
+): Record<string, string> | undefined => {
+  const userAgent = trimToUndefined(env.GDL_REDDIT_USER_AGENT);
+  return userAgent ? { "user-agent": userAgent } : undefined;
+};
 
 type RedditPostData = {
   post_hint?: string;
@@ -48,15 +60,18 @@ type RedditPostData = {
  */
 export const resolveRedditShareUrl = async (
   url: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  env: Record<string, string | undefined> = process.env
 ): Promise<string> => {
   if (!REDDIT_SHARE_URL_RE.test(url)) {
     return url;
   }
 
   try {
+    const headers = getRedditFetchHeadersFromEnv(env);
     const response = await fetchImpl(url, {
       redirect: "follow",
+      ...(headers ? { headers } : {}),
     });
 
     if (response.url) {
@@ -76,9 +91,10 @@ export const resolveRedditShareUrl = async (
  */
 export const getRedditDirectMediaUrls = async (
   url: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  env: Record<string, string | undefined> = process.env
 ): Promise<string[]> => {
-  const canonicalUrl = await resolveRedditShareUrl(url, fetchImpl);
+  const canonicalUrl = await resolveRedditShareUrl(url, fetchImpl, env);
   if (!REDDIT_POST_URL_RE.test(canonicalUrl)) {
     return [];
   }

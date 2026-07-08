@@ -10,6 +10,7 @@ import { spawn } from "child_process";
 import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
 import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
+import { getYtDlpCliOptionsFromEnv } from "./helpers/ytdlp-options";
 import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddit";
 import { explainDownloadFailure } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
@@ -596,6 +597,7 @@ const downloadVideo = async (
     console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
 
     const download = execYtDlp([
+      ...getYtDlpCliOptionsFromEnv(),
       url,
       "-o",
       outputPath,
