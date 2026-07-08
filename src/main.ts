@@ -597,7 +597,7 @@ const downloadVideo = async (
     console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
 
     const download = execYtDlp([
-      ...getYtDlpCliOptionsFromEnv(),
+      ...getYtDlpCliOptionsFromEnv(process.env, url),
       url,
       "-o",
       outputPath,
