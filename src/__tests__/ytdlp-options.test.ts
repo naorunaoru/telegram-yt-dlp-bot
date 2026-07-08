@@ -23,6 +23,44 @@ describe("getYtDlpCliOptionsFromEnv", () => {
     ).toEqual(["--cookies", "/run/secrets/ytdlp-cookies.txt"]);
   });
 
+  it("uses instagram cookies file for Instagram URLs", () => {
+    expect(
+      getYtDlpCliOptionsFromEnv(
+        {
+          DOWNLOADER_COOKIES_FILE: "/run/secrets/all-cookies.txt",
+          YTDLP_COOKIES_FILE: "/run/secrets/ytdlp-cookies.txt",
+          INSTAGRAM_COOKIES_FILE: "/run/secrets/instagram-cookies.txt",
+        },
+        "https://www.instagram.com/p/abc123/"
+      )
+    ).toEqual(["--cookies", "/run/secrets/instagram-cookies.txt"]);
+  });
+
+  it("does not use instagram cookies file for non-Instagram URLs", () => {
+    expect(
+      getYtDlpCliOptionsFromEnv(
+        {
+          DOWNLOADER_COOKIES_FILE: "/run/secrets/all-cookies.txt",
+          INSTAGRAM_COOKIES_FILE: "/run/secrets/instagram-cookies.txt",
+        },
+        "https://www.youtube.com/watch?v=abc123abc12"
+      )
+    ).toEqual(["--cookies", "/run/secrets/all-cookies.txt"]);
+  });
+
+  it("uses reddit cookies file for Reddit URLs", () => {
+    expect(
+      getYtDlpCliOptionsFromEnv(
+        {
+          DOWNLOADER_COOKIES_FILE: "/run/secrets/all-cookies.txt",
+          YTDLP_COOKIES_FILE: "/run/secrets/ytdlp-cookies.txt",
+          REDDIT_COOKIES_FILE: "/run/secrets/reddit-cookies.txt",
+        },
+        "https://www.reddit.com/r/funny/comments/abc123/post/"
+      )
+    ).toEqual(["--cookies", "/run/secrets/reddit-cookies.txt"]);
+  });
+
   it("supports cookies from browser", () => {
     expect(
       getYtDlpCliOptionsFromEnv({
@@ -35,6 +73,8 @@ describe("getYtDlpCliOptionsFromEnv", () => {
     expect(
       getYtDlpCliOptionsFromEnv({
         DOWNLOADER_COOKIES_FILE: " ",
+        INSTAGRAM_COOKIES_FILE: "",
+        REDDIT_COOKIES_FILE: "",
         YTDLP_COOKIES_FILE: "",
         YTDLP_COOKIES_FROM_BROWSER: "  ",
       })

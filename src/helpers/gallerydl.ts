@@ -21,6 +21,8 @@ export const getGalleryDlCliOptionsFromEnv = (
     "GDL_COOKIES_FILE",
     "DOWNLOADER_COOKIES_FILE",
   ]);
+  const instagramCookiesFile = trimToUndefined(env.INSTAGRAM_COOKIES_FILE);
+  const redditCookiesFile = trimToUndefined(env.REDDIT_COOKIES_FILE);
   const refreshToken = trimToUndefined(env.GDL_REDDIT_REFRESH_TOKEN);
   const userAgent = trimToUndefined(env.GDL_REDDIT_USER_AGENT);
   const api = trimToUndefined(env.GDL_REDDIT_API) || (refreshToken ? "oauth" : undefined);
@@ -29,6 +31,14 @@ export const getGalleryDlCliOptionsFromEnv = (
 
   if (cookiesFile) {
     args.push("-o", `extractor.*.cookies=${cookiesFile}`);
+  }
+
+  if (instagramCookiesFile) {
+    args.push("-o", `extractor.instagram.cookies=${instagramCookiesFile}`);
+  }
+
+  if (redditCookiesFile) {
+    args.push("-o", `extractor.reddit.cookies=${redditCookiesFile}`);
   }
 
   if (api) {

@@ -19,12 +19,25 @@ volumes:
 ```
 
 `DOWNLOADER_COOKIES_FILE` is passed to both `yt-dlp` and `gallery-dl`. If a
-single file is not what you want, use the per-tool overrides instead:
+single file is not what you want, use service-specific files instead:
+
+```env
+INSTAGRAM_COOKIES_FILE=/run/secrets/instagram-cookies.txt
+REDDIT_COOKIES_FILE=/run/secrets/reddit-cookies.txt
+```
+
+`INSTAGRAM_COOKIES_FILE` is passed to `yt-dlp` for Instagram URLs and to
+`gallery-dl` as `extractor.instagram.cookies`, so both downloaders use the same
+Instagram session. Per-tool overrides are still available when needed:
 
 ```env
 YTDLP_COOKIES_FILE=/run/secrets/ytdlp-cookies.txt
 GDL_COOKIES_FILE=/run/secrets/gallery-cookies.txt
 ```
+
+At container startup, configured cookie files are copied to `/tmp` before the
+bot starts. This keeps mounted secrets read-only while still letting downloaders
+refresh their in-memory cookie jar and save updates on exit.
 
 For local non-Docker runs, `YTDLP_COOKIES_FROM_BROWSER` is also supported, for
 example:
