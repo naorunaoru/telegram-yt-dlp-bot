@@ -6,6 +6,36 @@ set -e
 
 echo "Starting telegram-grabber-bot..."
 
+prepare_cookie_file() {
+    var_name="$1"
+    cookie_file="$(eval "printf '%s' \"\${$var_name:-}\"")"
+
+    if [ -z "$cookie_file" ]; then
+        return
+    fi
+
+    if [ ! -r "$cookie_file" ]; then
+        echo "Configured cookie file for $var_name is not readable: $cookie_file" >&2
+        exit 1
+    fi
+
+    case "$cookie_file" in
+        /tmp/*)
+            return
+            ;;
+    esac
+
+    prepared_file="/tmp/${var_name}.txt"
+    cp "$cookie_file" "$prepared_file"
+    chmod 600 "$prepared_file"
+    export "$var_name=$prepared_file"
+    echo "Prepared writable cookie file for $var_name at $prepared_file"
+}
+
+prepare_cookie_file DOWNLOADER_COOKIES_FILE
+prepare_cookie_file YTDLP_COOKIES_FILE
+prepare_cookie_file GDL_COOKIES_FILE
+
 # Check if auto-update is enabled (default: true)
 DOWNLOADERS_AUTO_UPDATE=${DOWNLOADERS_AUTO_UPDATE:-${YTDLP_AUTO_UPDATE:-true}}
 
