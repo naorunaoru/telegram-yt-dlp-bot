@@ -33,6 +33,8 @@ prepare_cookie_file() {
 }
 
 prepare_cookie_file DOWNLOADER_COOKIES_FILE
+prepare_cookie_file INSTAGRAM_COOKIES_FILE
+prepare_cookie_file REDDIT_COOKIES_FILE
 prepare_cookie_file YTDLP_COOKIES_FILE
 prepare_cookie_file GDL_COOKIES_FILE
 

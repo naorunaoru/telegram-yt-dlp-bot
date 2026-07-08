@@ -19,7 +19,16 @@ volumes:
 ```
 
 `DOWNLOADER_COOKIES_FILE` is passed to both `yt-dlp` and `gallery-dl`. If a
-single file is not what you want, use the per-tool overrides instead:
+single file is not what you want, use service-specific files instead:
+
+```env
+INSTAGRAM_COOKIES_FILE=/run/secrets/instagram-cookies.txt
+REDDIT_COOKIES_FILE=/run/secrets/reddit-cookies.txt
+```
+
+`INSTAGRAM_COOKIES_FILE` is passed to `yt-dlp` for Instagram URLs and to
+`gallery-dl` as `extractor.instagram.cookies`, so both downloaders use the same
+Instagram session. Per-tool overrides are still available when needed:
 
 ```env
 YTDLP_COOKIES_FILE=/run/secrets/ytdlp-cookies.txt
