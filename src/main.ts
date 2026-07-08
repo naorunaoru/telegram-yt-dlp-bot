@@ -10,7 +10,8 @@ import { spawn } from "child_process";
 import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
 import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
-import { resolveRedditShareUrl } from "./helpers/reddit";
+import { getYtDlpCliOptionsFromEnv } from "./helpers/ytdlp-options";
+import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddit";
 import { explainDownloadFailure } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
 import { VideoMetadata } from "./types";
@@ -596,6 +597,7 @@ const downloadVideo = async (
     console.log(formatLog(ctx, `Downloading video from URL: ${url}`));
 
     const download = execYtDlp([
+      ...getYtDlpCliOptionsFromEnv(),
       url,
       "-o",
       outputPath,
@@ -911,6 +913,25 @@ const sendMediaAlbum = async (
   return extractedFiles;
 };
 
+const downloadDirectMediaUrls = async (
+  ctx: Context,
+  mediaUrls: string[],
+  tempDir: string
+): Promise<DownloadResult | undefined> => {
+  const files: DownloadResult["files"] = [];
+
+  for (const mediaUrl of mediaUrls) {
+    const result = await downloadWithGalleryDl(ctx, mediaUrl, tempDir);
+    files.push(...result.files);
+  }
+
+  if (files.length === 0) {
+    return undefined;
+  }
+
+  return { files, metadata: {} as VideoMetadata };
+};
+
 /**
  * Process a single URL: try gallery-dl first, fall back to yt-dlp
  */
@@ -923,6 +944,27 @@ const processUrl = async (
   const normalizedUrl = await resolveRedditShareUrl(url);
   if (normalizedUrl !== url) {
     console.log(formatLog(ctx, `Resolved Reddit share URL: ${url} -> ${normalizedUrl}`));
+  }
+
+  const directRedditMediaUrls = await getRedditDirectMediaUrls(normalizedUrl);
+  if (directRedditMediaUrls.length > 0) {
+    console.log(
+      formatLog(
+        ctx,
+        `Resolved Reddit direct media URL${directRedditMediaUrls.length > 1 ? "s" : ""}: ${directRedditMediaUrls.join(", ")}`
+      )
+    );
+
+    try {
+      const directResult = await downloadDirectMediaUrls(ctx, directRedditMediaUrls, tempDir);
+      if (directResult) {
+        return directResult;
+      }
+    } catch (error: any) {
+      console.log(
+        formatLog(ctx, `Direct Reddit media download failed for ${normalizedUrl}: ${error.message}`)
+      );
+    }
   }
 
   let galleryDlError: Error | undefined;

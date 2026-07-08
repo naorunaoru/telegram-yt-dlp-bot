@@ -51,6 +51,94 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
 
+  const handleStdoutLine = (line: string) => {
+    if (!line.trim()) return;
+
+    // gallery-dl with --print filename outputs just the filename per line
+    // gallery-dl default output shows paths like: /path/to/file.jpg
+    // When using -q (quiet) + --print filename, only filenames are output
+
+    // Check for JSON metadata (from -j or --dump-json)
+    if (line.startsWith("{") && line.endsWith("}")) {
+      try {
+        JSON.parse(line); // Validate it's JSON
+        emitter.emit("galleryDlEvent", "metadata", line);
+        return;
+      } catch {
+        // Not valid JSON, treat as regular output
+      }
+    }
+
+    // Check for [filename] marker (custom format like yt-dlp)
+    const filenameMatch = line.match(/^\[filename\]\s+(.+)$/);
+    if (filenameMatch) {
+      emitter.emit("galleryDlEvent", "filename", filenameMatch[1]);
+      return;
+    }
+
+    // Check for gallery-dl's default download messages
+    // Format: "# /path/to/downloaded/file.jpg" or just the path
+    const hashPathMatch = line.match(/^#\s+(.+\.[a-zA-Z0-9]+)$/);
+    if (hashPathMatch) {
+      emitter.emit("galleryDlEvent", "filename", hashPathMatch[1]);
+      return;
+    }
+
+    // Check for path\tJSON format (from --print "{_path}\t%()j")
+    // The tab separates the file path from the JSON metadata
+    const tabIndex = line.indexOf('\t');
+    if (tabIndex !== -1) {
+      const potentialPath = line.substring(0, tabIndex);
+      // Check if the first part looks like a path
+      if (
+        potentialPath.match(/^[\/\.].*\.[a-zA-Z0-9]+$/) ||
+        potentialPath.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/)
+      ) {
+        // Emit the whole line - caller can parse path and JSON
+        emitter.emit("galleryDlEvent", "filename", line);
+        return;
+      }
+    }
+
+    // Plain path (when using --print filename or similar)
+    // Matches:
+    // - Absolute Unix paths: /path/to/file.ext
+    // - Relative paths with dot: ./path/to/file.ext
+    // - Relative paths without dot: temp/path/to/file.ext, path/file.ext
+    // - Windows paths: C:\path\to\file.ext
+    if (
+      line.match(/^\/.*\.[a-zA-Z0-9]+$/) ||
+      line.match(/^\..*\.[a-zA-Z0-9]+$/) ||
+      line.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/) ||
+      line.match(/^[a-zA-Z0-9_-]+\/.*\.[a-zA-Z0-9]+$/)
+    ) {
+      emitter.emit("galleryDlEvent", "filename", line);
+      return;
+    }
+
+    stdoutLines.push(line);
+    emitter.emit("galleryDlEvent", "stdout", line);
+  };
+
+  const handleStderrLine = (line: string) => {
+    if (line.trim()) {
+      stderrLines.push(line);
+      emitter.emit("galleryDlEvent", "stderr", line);
+    }
+  };
+
+  const flushRemainingBuffers = () => {
+    if (stdoutBuffer.trim()) {
+      handleStdoutLine(stdoutBuffer);
+      stdoutBuffer = "";
+    }
+
+    if (stderrBuffer.trim()) {
+      handleStderrLine(stderrBuffer);
+      stderrBuffer = "";
+    }
+  };
+
   // Handle stdout
   process.stdout.on("data", (data: Buffer) => {
     stdoutBuffer += data.toString();
@@ -58,70 +146,7 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
     stdoutBuffer = lines.pop() || ""; // Keep incomplete line in buffer
 
     for (const line of lines) {
-      if (!line.trim()) continue;
-
-      // gallery-dl with --print filename outputs just the filename per line
-      // gallery-dl default output shows paths like: /path/to/file.jpg
-      // When using -q (quiet) + --print filename, only filenames are output
-
-      // Check for JSON metadata (from -j or --dump-json)
-      if (line.startsWith("{") && line.endsWith("}")) {
-        try {
-          JSON.parse(line); // Validate it's JSON
-          emitter.emit("galleryDlEvent", "metadata", line);
-          continue;
-        } catch {
-          // Not valid JSON, treat as regular output
-        }
-      }
-
-      // Check for [filename] marker (custom format like yt-dlp)
-      const filenameMatch = line.match(/^\[filename\]\s+(.+)$/);
-      if (filenameMatch) {
-        emitter.emit("galleryDlEvent", "filename", filenameMatch[1]);
-        continue;
-      }
-
-      // Check for gallery-dl's default download messages
-      // Format: "# /path/to/downloaded/file.jpg" or just the path
-      const hashPathMatch = line.match(/^#\s+(.+\.[a-zA-Z0-9]+)$/);
-      if (hashPathMatch) {
-        emitter.emit("galleryDlEvent", "filename", hashPathMatch[1]);
-        continue;
-      }
-
-      // Check for path\tJSON format (from --print "{_path}\t%()j")
-      // The tab separates the file path from the JSON metadata
-      const tabIndex = line.indexOf('\t');
-      if (tabIndex !== -1) {
-        const potentialPath = line.substring(0, tabIndex);
-        // Check if the first part looks like a path
-        if (potentialPath.match(/^[\/\.].*\.[a-zA-Z0-9]+$/) || potentialPath.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/)) {
-          // Emit the whole line - caller can parse path and JSON
-          emitter.emit("galleryDlEvent", "filename", line);
-          continue;
-        }
-      }
-
-      // Plain path (when using --print filename or similar)
-      // Matches:
-      // - Absolute Unix paths: /path/to/file.ext
-      // - Relative paths with dot: ./path/to/file.ext
-      // - Relative paths without dot: temp/path/to/file.ext, path/file.ext
-      // - Windows paths: C:\path\to\file.ext
-      if (
-        line.match(/^\/.*\.[a-zA-Z0-9]+$/) ||           // Absolute Unix: /path/to/file.ext
-        line.match(/^\..*\.[a-zA-Z0-9]+$/) ||           // Dot-relative: ./path/file.ext
-        line.match(/^[A-Za-z]:\\.*\.[a-zA-Z0-9]+$/) ||  // Windows: C:\path\file.ext
-        line.match(/^[a-zA-Z0-9_-]+\/.*\.[a-zA-Z0-9]+$/) // Relative: temp/path/file.ext
-      ) {
-        emitter.emit("galleryDlEvent", "filename", line);
-        continue;
-      }
-
-      // Emit other output as generic stdout events
-      stdoutLines.push(line);
-      emitter.emit("galleryDlEvent", "stdout", line);
+      handleStdoutLine(line);
     }
   });
 
@@ -132,10 +157,7 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
     stderrBuffer = lines.pop() || "";
 
     for (const line of lines) {
-      if (line.trim()) {
-        stderrLines.push(line);
-        emitter.emit("galleryDlEvent", "stderr", line);
-      }
+      handleStderrLine(line);
     }
   });
 
@@ -149,6 +171,8 @@ export function execGalleryDl(args: string[], options: GalleryDlOptions = {}): G
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
+    flushRemainingBuffers();
+
     if (code !== 0 && code !== null) {
       emitter.emit(
         "error",

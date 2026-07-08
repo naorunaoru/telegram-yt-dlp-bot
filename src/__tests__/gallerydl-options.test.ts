@@ -19,6 +19,23 @@ describe("getGalleryDlCliOptionsFromEnv", () => {
     ]);
   });
 
+  it("uses shared downloader cookies file", () => {
+    expect(
+      getGalleryDlCliOptionsFromEnv({
+        DOWNLOADER_COOKIES_FILE: "/run/secrets/cookies.txt",
+      })
+    ).toEqual(["-o", "extractor.*.cookies=/run/secrets/cookies.txt"]);
+  });
+
+  it("lets gallery-dl cookies file override shared cookies file", () => {
+    expect(
+      getGalleryDlCliOptionsFromEnv({
+        DOWNLOADER_COOKIES_FILE: "/run/secrets/all-cookies.txt",
+        GDL_COOKIES_FILE: "/run/secrets/gallery-cookies.txt",
+      })
+    ).toEqual(["-o", "extractor.*.cookies=/run/secrets/gallery-cookies.txt"]);
+  });
+
   it("includes user agent override when provided", () => {
     expect(
       getGalleryDlCliOptionsFromEnv({
@@ -53,6 +70,8 @@ describe("getGalleryDlCliOptionsFromEnv", () => {
         GDL_REDDIT_API: "  ",
         GDL_REDDIT_REFRESH_TOKEN: " ",
         GDL_REDDIT_USER_AGENT: "",
+        GDL_COOKIES_FILE: " ",
+        DOWNLOADER_COOKIES_FILE: "",
       })
     ).toEqual([]);
   });

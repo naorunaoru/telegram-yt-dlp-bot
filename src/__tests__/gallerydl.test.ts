@@ -147,6 +147,38 @@ describe("execGalleryDl event parsing", () => {
       proc.emit("close", 1);
     }));
 
+  it("includes unterminated stderr details in error messages", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execGalleryDl(["https://example.com/image.jpg"]);
+      const proc = getLastProcess();
+
+      emitter.on("error", (error: Error) => {
+        expect(error.message).toBe(
+          "gallery-dl exited with code 1: [site][error] HTTP Error 403: Forbidden"
+        );
+        resolve();
+      });
+
+      proc.stderr.emit("data", Buffer.from("[site][error] HTTP Error 403: Forbidden"));
+      proc.emit("close", 1);
+    }));
+
+  it("parses unterminated filename markers before close", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execGalleryDl(["https://example.com/image.jpg"]);
+      const proc = getLastProcess();
+
+      emitter.on("galleryDlEvent", (type: string, data: string) => {
+        if (type === "filename") {
+          expect(data).toBe("/tmp/gallery/final.jpg");
+          resolve();
+        }
+      });
+
+      proc.stdout.emit("data", Buffer.from("[filename] /tmp/gallery/final.jpg"));
+      proc.emit("close", 0);
+    }));
+
   it("emits close on successful exit", () =>
     new Promise<void>((resolve) => {
       const emitter = execGalleryDl(["https://example.com/image.jpg"]);

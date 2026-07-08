@@ -138,6 +138,38 @@ describe("execYtDlp event parsing", () => {
       proc.emit("close", 1);
     }));
 
+  it("includes unterminated stderr details in error messages", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execYtDlp(["https://example.com"]);
+      const proc = getLastProcess();
+
+      emitter.on("error", (error: Error) => {
+        expect(error.message).toBe(
+          "yt-dlp exited with code 1: Account authentication is required"
+        );
+        resolve();
+      });
+
+      proc.stderr.emit("data", Buffer.from("ERROR: Account authentication is required"));
+      proc.emit("close", 1);
+    }));
+
+  it("parses unterminated filename markers before close", () =>
+    new Promise<void>((resolve) => {
+      const emitter = execYtDlp(["https://example.com"]);
+      const proc = getLastProcess();
+
+      emitter.on("ytDlpEvent", (type: string, data: string) => {
+        if (type === "filename") {
+          expect(data).toBe("/tmp/final.mp4");
+          resolve();
+        }
+      });
+
+      proc.stdout.emit("data", Buffer.from("[filename] /tmp/final.mp4"));
+      proc.emit("close", 0);
+    }));
+
   it("exposes kill method", () => {
     const emitter = execYtDlp(["https://example.com"]);
     const proc = getLastProcess();

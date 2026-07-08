@@ -14,33 +14,23 @@ const firstEnvValue = (
   return undefined;
 };
 
-export const getGalleryDlCliOptionsFromEnv = (
+export const getYtDlpCliOptionsFromEnv = (
   env: Record<string, string | undefined> = process.env
 ): string[] => {
   const cookiesFile = firstEnvValue(env, [
-    "GDL_COOKIES_FILE",
+    "YTDLP_COOKIES_FILE",
     "DOWNLOADER_COOKIES_FILE",
   ]);
-  const refreshToken = trimToUndefined(env.GDL_REDDIT_REFRESH_TOKEN);
-  const userAgent = trimToUndefined(env.GDL_REDDIT_USER_AGENT);
-  const api = trimToUndefined(env.GDL_REDDIT_API) || (refreshToken ? "oauth" : undefined);
+  const cookiesFromBrowser = trimToUndefined(env.YTDLP_COOKIES_FROM_BROWSER);
 
   const args: string[] = [];
 
   if (cookiesFile) {
-    args.push("-o", `extractor.*.cookies=${cookiesFile}`);
+    args.push("--cookies", cookiesFile);
   }
 
-  if (api) {
-    args.push("-o", `extractor.reddit.api=${api}`);
-  }
-
-  if (refreshToken) {
-    args.push("-o", `extractor.reddit.refresh-token=${refreshToken}`);
-  }
-
-  if (userAgent) {
-    args.push("-o", `extractor.reddit.headers.user-agent=${userAgent}`);
+  if (cookiesFromBrowser) {
+    args.push("--cookies-from-browser", cookiesFromBrowser);
   }
 
   return args;

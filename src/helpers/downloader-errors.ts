@@ -55,7 +55,16 @@ export const explainDownloadFailure = (url: string, errorMessage: string): strin
     lowerUrl.includes("instagram.com") &&
     /(login|required|cookies|logged-?in|authentication|empty media response)/.test(lowerError)
   ) {
-    return "Instagram is rejecting anonymous downloads for this post/reel right now. The bot likely needs logged-in cookies for Instagram, and the current deployment does not have them configured.";
+    return "Instagram is rejecting anonymous downloads for this post/reel right now. Configure valid logged-in cookies with DOWNLOADER_COOKIES_FILE or YTDLP_COOKIES_FILE.";
+  }
+
+  if (
+    lowerUrl.includes("reddit.com") &&
+    /(account authentication|required|cookies|logged-?in|authentication|forbidden)/.test(
+      lowerError
+    )
+  ) {
+    return "Reddit is requiring account authentication for this post. Configure valid Reddit cookies with DOWNLOADER_COOKIES_FILE or YTDLP_COOKIES_FILE, or configure gallery-dl Reddit OAuth with GDL_REDDIT_REFRESH_TOKEN.";
   }
 
   if (lowerError.includes("no suitable extractor")) {
