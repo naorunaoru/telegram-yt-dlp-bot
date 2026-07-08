@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { resolveRedditShareUrl } from "../helpers/reddit.js";
+import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "../helpers/reddit.js";
 
 describe("resolveRedditShareUrl", () => {
   it("returns non-share reddit URLs unchanged", async () => {
@@ -32,5 +32,83 @@ describe("resolveRedditShareUrl", () => {
     const url = "https://www.reddit.com/r/funny/s/AbCdEfGhIj";
 
     await expect(resolveRedditShareUrl(url, fetchMock as any)).resolves.toBe(url);
+  });
+});
+
+describe("getRedditDirectMediaUrls", () => {
+  it("returns direct media URL for reddit image posts", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        headers: {
+          getSetCookie: () => ["loid=test123; Path=/; Domain=.reddit.com"],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            data: {
+              children: [
+                {
+                  data: {
+                    post_hint: "image",
+                    url_overridden_by_dest: "https://i.redd.it/example.jpeg",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+    await expect(
+      getRedditDirectMediaUrls(
+        "https://www.reddit.com/r/funny/comments/abc123/some_title/",
+        fetchMock as any
+      )
+    ).resolves.toEqual(["https://i.redd.it/example.jpeg"]);
+  });
+
+  it("returns gallery media URLs from reddit post JSON", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        headers: {
+          getSetCookie: () => ["loid=test123; Path=/; Domain=.reddit.com"],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            data: {
+              children: [
+                {
+                  data: {
+                    gallery_data: {
+                      items: [{ media_id: "a" }, { media_id: "b" }],
+                    },
+                    media_metadata: {
+                      a: { status: "valid", s: { u: "https://preview.redd.it/a.jpg?width=1&amp;format=pjpg" } },
+                      b: { status: "valid", s: { mp4: "https://preview.redd.it/b.mp4" } },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+    await expect(
+      getRedditDirectMediaUrls(
+        "https://www.reddit.com/r/funny/comments/abc123/some_title/",
+        fetchMock as any
+      )
+    ).resolves.toEqual([
+      "https://preview.redd.it/a.jpg?width=1&format=pjpg",
+      "https://preview.redd.it/b.mp4",
+    ]);
   });
 });
