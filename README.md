@@ -26,6 +26,10 @@ YTDLP_COOKIES_FILE=/run/secrets/ytdlp-cookies.txt
 GDL_COOKIES_FILE=/run/secrets/gallery-cookies.txt
 ```
 
+At container startup, configured cookie files are copied to `/tmp` before the
+bot starts. This keeps mounted secrets read-only while still letting downloaders
+refresh their in-memory cookie jar and save updates on exit.
+
 For local non-Docker runs, `YTDLP_COOKIES_FROM_BROWSER` is also supported, for
 example:
 
