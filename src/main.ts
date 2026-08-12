@@ -14,6 +14,7 @@ import { getYtDlpCliOptionsFromEnv } from "./helpers/ytdlp-options";
 import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddit";
 import { explainDownloadFailure } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
+import { getFxTwitterFallback } from "./helpers/fxtwitter";
 import { VideoMetadata } from "./types";
 import {
   initCache,
@@ -1006,6 +1007,39 @@ const processUrl = async (
   } catch (error: any) {
     const ytDlpError = error instanceof Error ? error : new Error(String(error));
     const preferredError = explainDownloadFailure(normalizedUrl, ytDlpError.message);
+
+    if (process.env.FXTWITTER_FALLBACK_ENABLED !== "false") {
+      try {
+        const fxTwitter = await getFxTwitterFallback(normalizedUrl, {
+          apiBaseUrl: process.env.FXTWITTER_API_BASE_URL,
+          signal: AbortSignal.timeout(15_000),
+        });
+
+        if (fxTwitter) {
+          console.log(
+            formatLog(
+              ctx,
+              `FxTwitter resolved ${fxTwitter.mediaUrls.length} direct media URL${fxTwitter.mediaUrls.length === 1 ? "" : "s"}`
+            )
+          );
+          const directResult = await downloadDirectMediaUrls(
+            ctx,
+            fxTwitter.mediaUrls,
+            tempDir
+          );
+          if (directResult) {
+            return { ...directResult, caption: fxTwitter.caption };
+          }
+        }
+      } catch (fxTwitterError: any) {
+        console.log(
+          formatLog(
+            ctx,
+            `FxTwitter fallback failed for ${normalizedUrl}: ${fxTwitterError.message || fxTwitterError}`
+          )
+        );
+      }
+    }
 
     if (galleryDlError) {
       const galleryHint = explainDownloadFailure(normalizedUrl, galleryDlError.message);

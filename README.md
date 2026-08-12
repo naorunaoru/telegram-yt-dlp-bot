@@ -1,7 +1,9 @@
 # Telegram media grabber bot
 
 Telegram bot that tries `gallery-dl` first and falls back to `yt-dlp` for media
-links.
+links. For X/Twitter posts that both native extractors cannot see, it makes one
+last metadata request to FxTwitter and downloads only returned `twimg.com`
+media URLs. Set `FXTWITTER_FALLBACK_ENABLED=false` to disable this fallback.
 
 ## Reddit and Instagram authentication
 
