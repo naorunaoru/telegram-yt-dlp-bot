@@ -51,6 +51,109 @@ type RedditPostData = {
   >;
 };
 
+type RedditCommentData = Pick<RedditPostData, "media_metadata"> & {
+  id?: string;
+  name?: string;
+  richtext_json?: unknown;
+};
+
+const getRedditCommentId = (url: string): string | undefined => {
+  try {
+    const segments = new URL(url).pathname.split("/").filter(Boolean);
+    const commentsIndex = segments.indexOf("comments");
+    const permalinkTail = segments.slice(commentsIndex + 1);
+
+    // Both current (/comments/<post>/comment/<comment>) and traditional
+    // (/comments/<post>/<slug>/<comment>) Reddit permalinks have three
+    // segments after "comments". Post permalinks only have one or two.
+    if (commentsIndex === -1 || permalinkTail.length !== 3) {
+      return undefined;
+    }
+
+    return /^[a-z0-9]+$/i.test(permalinkTail[2]) ? permalinkTail[2] : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const collectRichtextMediaIds = (value: unknown, ids: string[] = []): string[] => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectRichtextMediaIds(item, ids);
+    }
+    return ids;
+  }
+
+  if (!value || typeof value !== "object") {
+    return ids;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    (record.e === "img" || record.e === "gif" || record.e === "video") &&
+    typeof record.id === "string"
+  ) {
+    ids.push(record.id);
+  }
+
+  for (const child of Object.values(record)) {
+    collectRichtextMediaIds(child, ids);
+  }
+  return ids;
+};
+
+const getMediaMetadataUrls = (
+  mediaMetadata: RedditPostData["media_metadata"],
+  preferredIds: string[] = []
+): string[] => {
+  if (!mediaMetadata) {
+    return [];
+  }
+
+  const orderedIds = Array.from(new Set([...preferredIds, ...Object.keys(mediaMetadata)]));
+
+  return orderedIds
+    .map((id) => mediaMetadata[id])
+    .filter((item) => Boolean(item && typeof item === "object" && item.status === "valid"))
+    .map((item) => item.s?.u || item.s?.gif || item.s?.mp4)
+    .filter((item): item is string => Boolean(item))
+    .map(decodeHtmlEntities);
+};
+
+const findRedditComment = (value: unknown, commentId: string): RedditCommentData | undefined => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = findRedditComment(item, commentId);
+      if (result) {
+        return result;
+      }
+    }
+    return undefined;
+  }
+
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const comment = record.data as Record<string, unknown> | undefined;
+  if (
+    record.kind === "t1" &&
+    comment &&
+    (comment.id === commentId || comment.name === `t1_${commentId}`)
+  ) {
+    return comment as RedditCommentData;
+  }
+
+  for (const child of Object.values(record)) {
+    const result = findRedditComment(child, commentId);
+    if (result) {
+      return result;
+    }
+  }
+  return undefined;
+};
+
 /**
  * Resolve Reddit share URLs (/s/...) to their canonical post URLs.
  * gallery-dl's RedditRedirectExtractor currently exits successfully after the
@@ -128,6 +231,20 @@ export const getRedditDirectMediaUrls = async (
     }
 
     const data = (await jsonResponse.json()) as any[];
+
+    const commentId = getRedditCommentId(canonicalUrl);
+    if (commentId) {
+      const comment = findRedditComment(data, commentId);
+      if (!comment) {
+        return [];
+      }
+
+      return getMediaMetadataUrls(
+        comment.media_metadata,
+        collectRichtextMediaIds(comment.richtext_json)
+      );
+    }
+
     const post = data?.[0]?.data?.children?.[0]?.data as RedditPostData | undefined;
     if (!post) {
       return [];
@@ -139,15 +256,12 @@ export const getRedditDirectMediaUrls = async (
     }
 
     if (post.gallery_data?.items?.length && post.media_metadata) {
-      const urls = post.gallery_data.items
-        .map((item) => (item.media_id ? post.media_metadata?.[item.media_id] : undefined))
-        .filter(
-          (item): item is NonNullable<RedditPostData["media_metadata"]>[string] =>
-            Boolean(item && typeof item === "object" && item.status === "valid")
-        )
-        .map((item) => item.s?.u || item.s?.gif || item.s?.mp4)
-        .filter((item): item is string => Boolean(item))
-        .map(decodeHtmlEntities);
+      const urls = getMediaMetadataUrls(
+        post.media_metadata,
+        post.gallery_data.items
+          .map((item) => item.media_id)
+          .filter((item): item is string => Boolean(item))
+      );
 
       if (urls.length > 0) {
         return urls;

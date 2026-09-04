@@ -156,4 +156,107 @@ describe("getRedditDirectMediaUrls", () => {
       "https://preview.redd.it/b.mp4",
     ]);
   });
+
+  it("returns media from the linked reddit comment instead of the parent post", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        headers: {
+          getSetCookie: () => ["loid=test123; Path=/; Domain=.reddit.com"],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            data: {
+              children: [
+                {
+                  kind: "t3",
+                  data: {
+                    post_hint: "image",
+                    url_overridden_by_dest: "https://i.redd.it/parent.jpeg",
+                  },
+                },
+              ],
+            },
+          },
+          {
+            data: {
+              children: [
+                {
+                  kind: "t1",
+                  data: {
+                    id: "p7n3qnc",
+                    richtext_json: {
+                      document: [
+                        { e: "par", c: [{ e: "img", id: "second" }] },
+                        { e: "par", c: [{ e: "img", id: "first" }] },
+                      ],
+                    },
+                    media_metadata: {
+                      first: {
+                        status: "valid",
+                        s: { u: "https://preview.redd.it/first.jpg?x=1&amp;y=2" },
+                      },
+                      second: { status: "valid", s: { u: "https://preview.redd.it/second.jpg" } },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+    await expect(
+      getRedditDirectMediaUrls(
+        "https://www.reddit.com/r/WaterfallDump/comments/1w6b4ql/comment/p7n3qnc/",
+        fetchMock as any
+      )
+    ).resolves.toEqual([
+      "https://preview.redd.it/second.jpg",
+      "https://preview.redd.it/first.jpg?x=1&y=2",
+    ]);
+  });
+
+  it("does not return parent post media when a linked comment has no media", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        headers: {
+          getSetCookie: () => ["loid=test123; Path=/; Domain=.reddit.com"],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            data: {
+              children: [
+                {
+                  kind: "t3",
+                  data: {
+                    post_hint: "image",
+                    url_overridden_by_dest: "https://i.redd.it/parent.jpeg",
+                  },
+                },
+              ],
+            },
+          },
+          {
+            data: {
+              children: [{ kind: "t1", data: { id: "p7n3qnc" } }],
+            },
+          },
+        ],
+      });
+
+    await expect(
+      getRedditDirectMediaUrls(
+        "https://www.reddit.com/r/WaterfallDump/comments/1w6b4ql/post_title/p7n3qnc/",
+        fetchMock as any
+      )
+    ).resolves.toEqual([]);
+  });
 });
