@@ -8,6 +8,8 @@ const TWITTER_HOSTS = new Set([
   "x.com",
   "www.x.com",
   "mobile.x.com",
+  "fixupx.com",
+  "www.fixupx.com",
 ]);
 
 const ALLOWED_MEDIA_HOSTS = new Set(["pbs.twimg.com", "video.twimg.com"]);

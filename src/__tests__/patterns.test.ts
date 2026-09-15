@@ -165,6 +165,20 @@ describe("Twitter/X patterns", () => {
     expect(findMatch("https://x.com/user/status/1234567890")).not.toBeNull();
   });
 
+  it("matches fixupx.com URLs", () => {
+    expect(
+      findMatch("https://fixupx.com/Wild_SPb/status/2099587669063823614")
+    ).not.toBeNull();
+  });
+
+  it("matches www.fixupx.com URLs", () => {
+    expect(findMatch("https://www.fixupx.com/user/status/1234567890")).not.toBeNull();
+  });
+
+  it("does not match fixupx lookalike hostnames", () => {
+    expectNoMatch("https://fixupx.com.evil.example/user/status/1234567890");
+  });
+
   it("does not match profile URLs", () => {
     expectNoMatch("https://twitter.com/user");
   });
