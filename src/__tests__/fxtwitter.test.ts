@@ -51,6 +51,34 @@ describe("getFxTwitterFallback", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("resolves fixupx links through the FxTwitter API", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        code: 200,
+        tweet: {
+          media: {
+            all: [{ url: "https://video.twimg.com/ext_tw_video/123/video.mp4" }],
+          },
+        },
+      })
+    );
+
+    await expect(
+      getFxTwitterFallback(
+        "https://fixupx.com/Wild_SPb/status/2099587669063823614",
+        { fetchImpl }
+      )
+    ).resolves.toEqual({
+      mediaUrls: ["https://video.twimg.com/ext_tw_video/123/video.mp4"],
+      caption: undefined,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.fxtwitter.com/status/2099587669063823614",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+  });
+
   it("rejects media URLs outside Twitter's CDN", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({

@@ -59,7 +59,8 @@ const redditPattern: PatternConfig = {
 };
 
 const twitterPattern: PatternConfig = {
-  regex: /https?:\/\/((?:twitter|x)\.com)\/[a-zA-Z0-9_]+\/status\/\d+/gi,
+  regex:
+    /https?:\/\/(?:(?:twitter|x)\.com|(?:www\.)?fixupx\.com)\/[a-zA-Z0-9_]+\/status\/\d+/gi,
   flags: [
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
