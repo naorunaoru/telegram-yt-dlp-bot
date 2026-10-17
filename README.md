@@ -5,6 +5,18 @@ links. For X/Twitter posts that both native extractors cannot see, it makes one
 last metadata request to FxTwitter and downloads only returned `twimg.com`
 media URLs. Set `FXTWITTER_FALLBACK_ENABLED=false` to disable this fallback.
 
+## Anonymous Instagram downloads
+
+The Docker image and downloader updater install `yt-dlp[default,curl-cffi]`.
+This enables browser impersonation, which yt-dlp's Instagram extractor selects
+automatically for anonymous requests. No global `--impersonate` flag is needed.
+Verify availability with `yt-dlp --list-impersonate-targets`.
+
+Keep cookie settings unset to avoid making requests with a personal account.
+Logged-in cookies can expose that account to challenges or bans. Anonymous
+access remains subject to Instagram's restrictions and rate limits; this does
+not guarantee access to photo carousels, private posts, or age-gated media.
+
 ## Reddit and Instagram authentication
 
 Reddit and Instagram often reject anonymous downloader traffic. For Docker

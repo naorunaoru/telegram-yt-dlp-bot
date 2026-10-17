@@ -22,8 +22,9 @@ update_package() {
     LATEST_VERSION=$(wget -qO- "https://pypi.org/pypi/$PACKAGE/json" | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Latest version: $LATEST_VERSION"
     
-    # Compare versions
-    if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+    # Always resolve yt-dlp extras, even when its version is unchanged, so an
+    # existing container also acquires missing browser-impersonation support.
+    if [ "$PACKAGE" != "yt-dlp" ] && [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] $PACKAGE is already up to date"
         return 0
     fi
@@ -31,7 +32,7 @@ update_package() {
     # Update package
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Updating $PACKAGE..."
     if [ "$PACKAGE" = "yt-dlp" ]; then
-        pip install --break-system-packages -U "yt-dlp[default]"
+        pip install --break-system-packages -U "yt-dlp[default,curl-cffi]"
     else
         pip install --break-system-packages -U "$PACKAGE"
     fi

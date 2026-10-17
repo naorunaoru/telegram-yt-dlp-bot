@@ -13,7 +13,7 @@ WORKDIR /usr/src/app
 
 COPY . .
 
-RUN npm install && npm run build && pip install --break-system-packages "yt-dlp[default]" gallery-dl
+RUN npm install && npm run build && pip install --break-system-packages "yt-dlp[default,curl-cffi]" gallery-dl
 
 # yt-dlp configuration
 COPY yt-dlp.conf /etc/yt-dlp/config
