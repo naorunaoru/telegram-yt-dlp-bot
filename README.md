@@ -5,6 +5,9 @@ links. For X/Twitter posts that both native extractors cannot see, it makes one
 last metadata request to FxTwitter and downloads only returned `twimg.com`
 media URLs. Set `FXTWITTER_FALLBACK_ENABLED=false` to disable this fallback.
 
+Video links from Bilibili (`bilibili.com/video/BV...`, `av...`, and `b23.tv`)
+are downloaded through yt-dlp as well.
+
 ## Anonymous Instagram downloads
 
 The Docker image and downloader updater install `yt-dlp[default,curl-cffi]`.

@@ -134,6 +134,32 @@ describe("YouTube patterns", () => {
   });
 });
 
+describe("Bilibili patterns", () => {
+  it("matches BV video URLs", () => {
+    expect(findMatch("https://www.bilibili.com/video/BV1xx411c7mD/")).not.toBeNull();
+  });
+
+  it("matches localized video URLs with query parameters", () => {
+    expect(
+      findMatch(
+        "https://www.bilibili.com/en/video/BV1KMHQ6LEsr/?trackid=web_pegasus_0.router-web-pegasus-2479516-sm4rx.1792623678612.369&spm_id_from=333.1007.tianma.2-1-6.click"
+      )
+    ).not.toBeNull();
+  });
+
+  it("matches av video URLs", () => {
+    expect(findMatch("https://bilibili.com/video/av170001")).not.toBeNull();
+  });
+
+  it("matches b23 short URLs", () => {
+    expect(findMatch("https://b23.tv/AbCdEf")).not.toBeNull();
+  });
+
+  it("does not match Bilibili non-video pages", () => {
+    expectNoMatch("https://www.bilibili.com/");
+  });
+});
+
 describe("Reddit patterns", () => {
   it("matches standard post URLs", () => {
     expect(findMatch("https://www.reddit.com/r/funny/comments/abc123/some_title")).not.toBeNull();
