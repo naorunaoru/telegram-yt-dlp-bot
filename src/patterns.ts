@@ -48,7 +48,7 @@ const youtubePattern: PatternConfig = {
 
 const bilibiliPattern: PatternConfig = {
   regex:
-    /https?:\/\/(?:(?:www\.)?bilibili\.com\/(?:[a-z]{2}\/)?video\/(?:BV[\w]+|av\d+)|b23\.tv\/[\w-]+)(?:[/?#&].*)?/gi,
+    /https?:\/\/(?:(?:www\.)?bilibili\.com\/(?:[a-z]{2}\/)?video\/(?:BV[\w]+|av\d+)|b23\.tv\/[\w-]+)(?:[/?#&][^\s<>"']*)?/gi,
   flags: [
     "-f",
     "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",

@@ -155,6 +155,14 @@ describe("Bilibili patterns", () => {
     expect(findMatch("https://b23.tv/AbCdEf")).not.toBeNull();
   });
 
+  it("extracts only the Bilibili URL when followed by text or another URL", () => {
+    const text = "https://www.bilibili.com/video/BV1xx411c7mD/?p=2 and https://b23.tv/AbCdEf?share=1 done";
+    expect(findAllMatches(text).map(({ url }) => url)).toEqual([
+      "https://www.bilibili.com/video/BV1xx411c7mD/?p=2",
+      "https://b23.tv/AbCdEf?share=1",
+    ]);
+  });
+
   it("does not match Bilibili non-video pages", () => {
     expectNoMatch("https://www.bilibili.com/");
   });
