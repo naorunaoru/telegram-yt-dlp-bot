@@ -46,6 +46,17 @@ const youtubePattern: PatternConfig = {
     metadata.title ? `${metadata.title}\n\n${url}` : undefined,
 };
 
+const bilibiliPattern: PatternConfig = {
+  regex:
+    /https?:\/\/(?:(?:www\.)?bilibili\.com\/(?:[a-z]{2}\/)?video\/(?:BV[\w]+|av\d+)|b23\.tv\/[\w-]+)(?:[/?#&][^\s<>"']*)?/gi,
+  flags: [
+    "-f",
+    "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
+  ],
+  formatMetadata: (metadata, url) =>
+    metadata.title ? `${metadata.title}\n\n${url}` : undefined,
+};
+
 const redditPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?:(?:r|user)\/[^/]+\/)?(?:(?:comments\/[^/]+\/[^/]+)|(?:s\/[^/?#&]+))/gi,
@@ -74,6 +85,7 @@ export const patterns = [
   instagramPattern,
   ytShortsPattern,
   youtubePattern,
+  bilibiliPattern,
   redditPattern,
   twitterPattern,
 ];
