@@ -5,8 +5,36 @@ links. For X/Twitter posts that both native extractors cannot see, it makes one
 last metadata request to FxTwitter and downloads only returned `twimg.com`
 media URLs. Set `FXTWITTER_FALLBACK_ENABLED=false` to disable this fallback.
 
-Video links from Bilibili (`bilibili.com/video/BV...`, `av...`, and `b23.tv`)
-are downloaded through yt-dlp as well.
+Video links from Bilibili (`bilibili.com/video/BV...`, `av...`, localized paths
+such as `bilibili.com/ru/video/BV...`, and `b23.tv`) are downloaded through
+yt-dlp as well. `b23.tv` short links are resolved to their `bilibili.com`
+target first, since no extractor matches that host.
+
+## Bilibili extractor plugin
+
+`yt-dlp-plugins/` holds a yt-dlp extractor plugin. The Docker image copies it to
+`/etc/yt-dlp/plugins`, which yt-dlp loads automatically — no CLI flag needed.
+It covers two cases the built-in `BiliBiliIE` cannot:
+
+- Localized video paths (`bilibili.com/ru/video/BV...`) do not match its
+  `_VALID_URL`, so they fall through to the generic extractor, which resolves
+  the page's `player.bilibili.com` iframe into a bogus `player` format and
+  fails.
+- The canonical `/video/BV...` path is answered with a JavaScript redirect
+  shell that carries no playback data for many non-CN clients, while any valid
+  locale-prefixed path is server-rendered. The plugin retries through a locale
+  path when it detects that shell.
+
+Delete the plugin once upstream yt-dlp accepts localized video paths.
+
+Bilibili format selection filters on `filesize_approx`, not `filesize`: Bilibili
+only reports estimated sizes, and it serves video and audio separately with no
+combined format, so a bare `filesize` filter or a `/b` fallback selects nothing.
+
+Bilibili downloads are rate-limited (`--limit-rate 1M`, `--sleep-requests 0.5`)
+to avoid triggering the CDN's aggressive throttling, which returns HTTP 503
+after rapid requests. A 20 MB video takes ~20 seconds instead of potentially
+faster, but this reduces download failures.
 
 ## Anonymous Instagram downloads
 

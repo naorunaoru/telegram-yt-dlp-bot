@@ -12,6 +12,7 @@ import { truncateWithEllipsis } from "./helpers/text";
 import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
 import { getYtDlpCliOptionsFromEnv } from "./helpers/ytdlp-options";
 import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddit";
+import { resolveBilibiliShortUrl } from "./helpers/bilibili";
 import { explainDownloadFailure } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
 import { getFxTwitterFallback } from "./helpers/fxtwitter";
@@ -942,9 +943,10 @@ const processUrl = async (
   pattern: (typeof patterns)[0],
   tempDir: string
 ): Promise<DownloadResult> => {
-  const normalizedUrl = await resolveRedditShareUrl(url);
+  const redditUrl = await resolveRedditShareUrl(url);
+  const normalizedUrl = await resolveBilibiliShortUrl(redditUrl);
   if (normalizedUrl !== url) {
-    console.log(formatLog(ctx, `Resolved Reddit share URL: ${url} -> ${normalizedUrl}`));
+    console.log(formatLog(ctx, `Resolved share URL: ${url} -> ${normalizedUrl}`));
   }
 
   const directRedditMediaUrls = await getRedditDirectMediaUrls(normalizedUrl);

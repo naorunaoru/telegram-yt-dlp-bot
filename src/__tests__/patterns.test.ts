@@ -166,6 +166,17 @@ describe("Bilibili patterns", () => {
   it("does not match Bilibili non-video pages", () => {
     expectNoMatch("https://www.bilibili.com/");
   });
+
+  it("filters Bilibili formats by filesize_approx, never bare filesize", () => {
+    const pattern = findMatch("https://www.bilibili.com/video/BV1xx411c7mD/");
+    const flags = pattern?.flags ?? [];
+    const formatFlag = flags[flags.indexOf("-f") + 1] ?? "";
+
+    // Bilibili only reports filesize_approx and has no combined formats, so a
+    // bare `filesize` filter selects nothing and the download fails.
+    expect(formatFlag).toContain("filesize_approx<30M");
+    expect(formatFlag).not.toContain("[filesize<");
+  });
 });
 
 describe("Reddit patterns", () => {

@@ -50,8 +50,16 @@ const bilibiliPattern: PatternConfig = {
   regex:
     /https?:\/\/(?:(?:www\.)?bilibili\.com\/(?:[a-z]{2}\/)?video\/(?:BV[\w]+|av\d+)|b23\.tv\/[\w-]+)(?:[/?#&][^\s<>"']*)?/gi,
   flags: [
+    // Bilibili reports filesize_approx only, and serves video/audio separately
+    // with no combined format, so a bare `filesize` filter or a `/b` fallback
+    // would select nothing.
     "-f",
-    "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize<30M]+ba) / (bv*[filesize<30M]+ba/b)",
+    "(bv*[vcodec~='^((he|a)vc|h26[45])'][filesize_approx<30M]+ba) / (bv*[filesize_approx<30M]+ba/b)",
+    // Bilibili's CDN aggressively rate-limits; throttle to avoid 503s.
+    "--limit-rate",
+    "1M",
+    "--sleep-requests",
+    "0.5",
   ],
   formatMetadata: (metadata, url) =>
     metadata.title ? `${metadata.title}\n\n${url}` : undefined,
