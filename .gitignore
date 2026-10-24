@@ -6,6 +6,9 @@ node_modules
 
 yt-dlp
 
+# Bytecode from locally exercising the yt-dlp plugins
+__pycache__/
+
 # Cache database
 data/
 

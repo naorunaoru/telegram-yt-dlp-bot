@@ -18,6 +18,9 @@ RUN npm install && npm run build && pip install --break-system-packages "yt-dlp[
 # yt-dlp configuration
 COPY yt-dlp.conf /etc/yt-dlp/config
 
+# yt-dlp extractor plugins, auto-loaded from /etc/yt-dlp/plugins
+COPY yt-dlp-plugins /etc/yt-dlp/plugins
+
 # gallery-dl configuration
 COPY gallery-dl.conf /etc/gallery-dl.conf
 

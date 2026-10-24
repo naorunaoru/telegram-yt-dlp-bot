@@ -147,6 +147,11 @@ describe("Bilibili patterns", () => {
     ).not.toBeNull();
   });
 
+  it("matches extended locale variants like zh-cn and pt_BR", () => {
+    expect(findMatch("https://www.bilibili.com/zh-cn/video/BV1xx411c7mD/")).not.toBeNull();
+    expect(findMatch("https://www.bilibili.com/pt_BR/video/BV1xx411c7mD/")).not.toBeNull();
+  });
+
   it("matches av video URLs", () => {
     expect(findMatch("https://bilibili.com/video/av170001")).not.toBeNull();
   });
@@ -165,6 +170,17 @@ describe("Bilibili patterns", () => {
 
   it("does not match Bilibili non-video pages", () => {
     expectNoMatch("https://www.bilibili.com/");
+  });
+
+  it("filters Bilibili formats by filesize_approx, never bare filesize", () => {
+    const pattern = findMatch("https://www.bilibili.com/video/BV1xx411c7mD/");
+    const flags = pattern?.flags ?? [];
+    const formatFlag = flags[flags.indexOf("-f") + 1] ?? "";
+
+    // Bilibili only reports filesize_approx and has no combined formats, so a
+    // bare `filesize` filter selects nothing and the download fails.
+    expect(formatFlag).toContain("filesize_approx<30M");
+    expect(formatFlag).not.toContain("[filesize<");
   });
 });
 
