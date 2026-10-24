@@ -48,7 +48,7 @@ const youtubePattern: PatternConfig = {
 
 const bilibiliPattern: PatternConfig = {
   regex:
-    /https?:\/\/(?:(?:www\.)?bilibili\.com\/(?:[a-z]{2}\/)?video\/(?:BV[\w]+|av\d+)|b23\.tv\/[\w-]+)(?:[/?#&][^\s<>"']*)?/gi,
+    /https?:\/\/(?:(?:www\.)?bilibili\.com\/(?:[a-z]{2}(?:[_-][A-Za-z0-9]+)?\/)?video\/(?:BV[\w]+|av\d+)|b23\.tv\/[\w-]+)(?:[/?#&][^\s<>"']*)?/gi,
   flags: [
     // Bilibili reports filesize_approx only, and serves video/audio separately
     // with no combined format, so a bare `filesize` filter or a `/b` fallback

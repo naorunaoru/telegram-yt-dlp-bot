@@ -943,13 +943,12 @@ const processUrl = async (
   pattern: (typeof patterns)[0],
   tempDir: string
 ): Promise<DownloadResult> => {
-  const redditUrl = await resolveRedditShareUrl(url);
-  const normalizedUrl = await resolveBilibiliShortUrl(redditUrl);
-  if (normalizedUrl !== url) {
-    console.log(formatLog(ctx, `Resolved share URL: ${url} -> ${normalizedUrl}`));
+  const resolvedUrl = await resolveBilibiliShortUrl(await resolveRedditShareUrl(url));
+  if (resolvedUrl !== url) {
+    console.log(formatLog(ctx, `Resolved share URL: ${url} -> ${resolvedUrl}`));
   }
 
-  const directRedditMediaUrls = await getRedditDirectMediaUrls(normalizedUrl);
+  const directRedditMediaUrls = await getRedditDirectMediaUrls(resolvedUrl);
   if (directRedditMediaUrls.length > 0) {
     console.log(
       formatLog(
@@ -965,7 +964,7 @@ const processUrl = async (
       }
     } catch (error: any) {
       console.log(
-        formatLog(ctx, `Direct Reddit media download failed for ${normalizedUrl}: ${error.message}`)
+        formatLog(ctx, `Direct Reddit media download failed for ${resolvedUrl}: ${error.message}`)
       );
     }
   }
@@ -973,31 +972,31 @@ const processUrl = async (
   let galleryDlError: Error | undefined;
 
   // Check if this is a bilibili URL - skip gallery-dl since it doesn't support bilibili
-  const isBilibiliUrl = /bilibili\.com|b23\.tv/i.test(normalizedUrl);
+  const isBilibiliUrl = /(?:^|\.)(?:bilibili\.com|b23\.tv)\//i.test(resolvedUrl);
 
   if (isBilibiliUrl) {
     console.log(formatLog(ctx, `Skipping gallery-dl for bilibili URL (not supported)`));
   } else {
     // Try gallery-dl first
     try {
-      const result = await downloadWithGalleryDl(ctx, normalizedUrl, tempDir);
+      const result = await downloadWithGalleryDl(ctx, resolvedUrl, tempDir);
       if (result.files.length > 0) {
         return result;
       }
     } catch (error: any) {
       galleryDlError = error instanceof Error ? error : new Error(String(error));
       console.log(
-        formatLog(ctx, `gallery-dl failed for ${normalizedUrl}: ${galleryDlError.message}`)
+        formatLog(ctx, `gallery-dl failed for ${resolvedUrl}: ${galleryDlError.message}`)
       );
       // Continue to yt-dlp fallback
     }
   }
 
   // Fall back to yt-dlp
-  console.log(formatLog(ctx, `Falling back to yt-dlp for ${normalizedUrl}`));
+  console.log(formatLog(ctx, `Falling back to yt-dlp for ${resolvedUrl}`));
 
   try {
-    const { path: videoPath, metadata } = await processVideo(ctx, normalizedUrl, pattern, tempDir);
+    const { path: videoPath, metadata } = await processVideo(ctx, resolvedUrl, pattern, tempDir);
 
     const stats = fs.statSync(videoPath);
     return {
@@ -1015,11 +1014,11 @@ const processUrl = async (
     };
   } catch (error: any) {
     const ytDlpError = error instanceof Error ? error : new Error(String(error));
-    const preferredError = explainDownloadFailure(normalizedUrl, ytDlpError.message);
+    const preferredError = explainDownloadFailure(resolvedUrl, ytDlpError.message);
 
     if (process.env.FXTWITTER_FALLBACK_ENABLED !== "false") {
       try {
-        const fxTwitter = await getFxTwitterFallback(normalizedUrl, {
+        const fxTwitter = await getFxTwitterFallback(resolvedUrl, {
           apiBaseUrl: process.env.FXTWITTER_API_BASE_URL,
           signal: AbortSignal.timeout(15_000),
         });
@@ -1044,14 +1043,14 @@ const processUrl = async (
         console.log(
           formatLog(
             ctx,
-            `FxTwitter fallback failed for ${normalizedUrl}: ${fxTwitterError.message || fxTwitterError}`
+            `FxTwitter fallback failed for ${resolvedUrl}: ${fxTwitterError.message || fxTwitterError}`
           )
         );
       }
     }
 
     if (galleryDlError) {
-      const galleryHint = explainDownloadFailure(normalizedUrl, galleryDlError.message);
+      const galleryHint = explainDownloadFailure(resolvedUrl, galleryDlError.message);
       if (galleryHint !== preferredError) {
         throw new Error(`${preferredError}\nFallback details: ${galleryHint}`);
       }

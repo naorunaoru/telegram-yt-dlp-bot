@@ -147,6 +147,11 @@ describe("Bilibili patterns", () => {
     ).not.toBeNull();
   });
 
+  it("matches extended locale variants like zh-cn and pt_BR", () => {
+    expect(findMatch("https://www.bilibili.com/zh-cn/video/BV1xx411c7mD/")).not.toBeNull();
+    expect(findMatch("https://www.bilibili.com/pt_BR/video/BV1xx411c7mD/")).not.toBeNull();
+  });
+
   it("matches av video URLs", () => {
     expect(findMatch("https://bilibili.com/video/av170001")).not.toBeNull();
   });
