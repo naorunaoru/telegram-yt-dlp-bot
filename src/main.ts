@@ -972,18 +972,25 @@ const processUrl = async (
 
   let galleryDlError: Error | undefined;
 
-  // Try gallery-dl first
-  try {
-    const result = await downloadWithGalleryDl(ctx, normalizedUrl, tempDir);
-    if (result.files.length > 0) {
-      return result;
+  // Check if this is a bilibili URL - skip gallery-dl since it doesn't support bilibili
+  const isBilibiliUrl = /bilibili\.com|b23\.tv/i.test(normalizedUrl);
+
+  if (isBilibiliUrl) {
+    console.log(formatLog(ctx, `Skipping gallery-dl for bilibili URL (not supported)`));
+  } else {
+    // Try gallery-dl first
+    try {
+      const result = await downloadWithGalleryDl(ctx, normalizedUrl, tempDir);
+      if (result.files.length > 0) {
+        return result;
+      }
+    } catch (error: any) {
+      galleryDlError = error instanceof Error ? error : new Error(String(error));
+      console.log(
+        formatLog(ctx, `gallery-dl failed for ${normalizedUrl}: ${galleryDlError.message}`)
+      );
+      // Continue to yt-dlp fallback
     }
-  } catch (error: any) {
-    galleryDlError = error instanceof Error ? error : new Error(String(error));
-    console.log(
-      formatLog(ctx, `gallery-dl failed for ${normalizedUrl}: ${galleryDlError.message}`)
-    );
-    // Continue to yt-dlp fallback
   }
 
   // Fall back to yt-dlp
