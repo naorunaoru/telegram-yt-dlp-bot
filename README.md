@@ -5,8 +5,13 @@ links. For X/Twitter posts that both native extractors cannot see, it makes one
 last metadata request to FxTwitter and downloads only returned `twimg.com`
 media URLs. Set `FXTWITTER_FALLBACK_ENABLED=false` to disable this fallback.
 
-For Reddit posts and share links, when both native extractors fail, the bot
-requests a legacy embed from `vxreddit.com` and downloads the returned images,
+For Reddit posts and share links, the bot normally tries both native extractors
+before vxreddit. If gallery-dl explicitly reports a Reddit network-security block
+or authentication requirement, vxreddit is tried immediately instead of waiting
+for another native attempt. If vxreddit fails, yt-dlp still gets its chance; the
+provider is never attempted twice for the same URL. Transient errors keep the
+normal downloader order and retry behavior. The fallback requests a legacy embed
+from `vxreddit.com` and downloads the returned images,
 galleries (up to 10 items), or playable video. Video/audio muxing uses vxreddit's
 proxy. Requests to the service and media hosts do not send account cookies.
 Only approved HTTPS Reddit media hosts and the verified vxreddit video renderer

@@ -47,6 +47,14 @@ export const summarizeProcessFailure = (
   return `${toolName} exited with code ${code}`;
 };
 
+/** Explicit access-denial messages, not generic HTTP errors or transient failures. */
+export const isDefinitiveRedditBlock = (url: string, message: string): boolean => {
+  try {
+    if (!['reddit.com', 'www.reddit.com', 'old.reddit.com', 'm.reddit.com'].includes(new URL(url).hostname)) return false;
+  } catch { return false; }
+  return /blocked by network security|account authentication is required|(?:login|authentication) required/i.test(message);
+};
+
 export const explainDownloadFailure = (url: string, errorMessage: string): string => {
   const lowerUrl = url.toLowerCase();
   const lowerError = errorMessage.toLowerCase();
