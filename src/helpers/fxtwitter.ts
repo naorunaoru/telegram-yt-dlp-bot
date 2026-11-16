@@ -58,6 +58,8 @@ const getSafeMediaUrl = (value: unknown): string | undefined => {
   }
 };
 
+export const isFxTwitterUrl = (url: string): boolean => Boolean(getTweetId(url));
+
 export const getFxTwitterFallback = async (
   url: string,
   options: {
