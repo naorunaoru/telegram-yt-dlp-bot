@@ -16,6 +16,7 @@ import { explainDownloadFailure } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
 import { getFxTwitterFallback, isFxTwitterUrl } from "./helpers/fxtwitter";
 import { DownloadTrace } from "./helpers/download-attribution";
+import { getVxRedditFallback, downloadVxRedditMedia, isVxRedditSupported } from "./helpers/vxreddit";
 import { VideoMetadata } from "./types";
 import {
   initCache,
@@ -1013,6 +1014,20 @@ const processUrl = async (
   } catch (error: any) {
     const ytDlpError = error instanceof Error ? error : new Error(String(error));
     const preferredError = explainDownloadFailure(normalizedUrl, ytDlpError.message);
+
+    if (process.env.VXREDDIT_FALLBACK_ENABLED !== "false" && isVxRedditSupported(normalizedUrl)) {
+      try {
+        const rescued = await trace.run("vxreddit", async () => {
+          const fallback = await getVxRedditFallback(normalizedUrl);
+          if (!fallback) return undefined;
+          const files = await downloadVxRedditMedia(fallback.media, tempDir);
+          return files.length ? { files, metadata: {} as VideoMetadata, caption: fallback.caption } : undefined;
+        }, result => Boolean(result?.files.length));
+        if (rescued) return rescued;
+      } catch (vxRedditError: any) {
+        console.log(formatLog(ctx, `vxReddit fallback failed: ${vxRedditError.message || vxRedditError}`));
+      }
+    }
 
     if (process.env.FXTWITTER_FALLBACK_ENABLED !== "false" && isFxTwitterUrl(normalizedUrl)) {
       try {

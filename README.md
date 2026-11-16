@@ -5,6 +5,16 @@ links. For X/Twitter posts that both native extractors cannot see, it makes one
 last metadata request to FxTwitter and downloads only returned `twimg.com`
 media URLs. Set `FXTWITTER_FALLBACK_ENABLED=false` to disable this fallback.
 
+For Reddit posts and share links, when both native extractors fail, the bot
+requests a legacy embed from `vxreddit.com` and downloads the returned images,
+galleries (up to 10 items), or playable video. Video/audio muxing uses vxreddit's
+proxy. Requests to the service and media hosts do not send account cookies.
+Only approved HTTPS Reddit media hosts and the verified vxreddit video renderer
+are accepted; redirects are revalidated and downloads respect Telegram size limits.
+Set `VXREDDIT_FALLBACK_ENABLED=false` to disable this fallback. Successful rescues
+appear as **vxReddit** in backend analytics and recent activity. Service failures
+remain best-effort; they do not guarantee access to private or removed posts.
+
 Video links from Bilibili (`bilibili.com/video/BV...`, `av...`, and `b23.tv`)
 are downloaded through yt-dlp as well.
 
