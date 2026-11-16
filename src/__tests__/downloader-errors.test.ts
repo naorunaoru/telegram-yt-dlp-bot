@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   explainDownloadFailure,
+  isDefinitiveRedditBlock,
   summarizeProcessFailure,
 } from "../helpers/downloader-errors.js";
+
+describe('isDefinitiveRedditBlock', () => {
+  it.each(["You've been blocked by network security.", 'Account authentication is required', 'Login required', 'AUTHENTICATION REQUIRED'])('recognizes explicit denial: %s', message => {
+    expect(isDefinitiveRedditBlock('https://www.reddit.com/comments/abc/', message)).toBe(true);
+  });
+  it.each(['HTTP Error 429: Too Many Requests', 'HTTP Error 503: Service Unavailable', 'Connection timed out', 'HTTP Error 403: Forbidden', 'Unsupported URL', 'gallery-dl: No files downloaded'])('does not classify a transient or generic error: %s', message => {
+    expect(isDefinitiveRedditBlock('https://www.reddit.com/comments/abc/', message)).toBe(false);
+  });
+  it.each(['https://reddit.com.evil.example/comments/abc/', 'https://x.com/a/status/123', 'not a URL'])('never changes other hosts or invalid URLs: %s', url => {
+    expect(isDefinitiveRedditBlock(url, 'Login required')).toBe(false);
+  });
+});
 
 describe("summarizeProcessFailure", () => {
   it("prefers explicit ERROR lines", () => {

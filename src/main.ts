@@ -12,7 +12,7 @@ import { truncateWithEllipsis } from "./helpers/text";
 import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
 import { getYtDlpCliOptionsFromEnv } from "./helpers/ytdlp-options";
 import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddit";
-import { explainDownloadFailure } from "./helpers/downloader-errors";
+import { explainDownloadFailure, isDefinitiveRedditBlock } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
 import { getFxTwitterFallback, isFxTwitterUrl } from "./helpers/fxtwitter";
 import { DownloadTrace } from "./helpers/download-attribution";
@@ -971,6 +971,24 @@ const processUrl = async (
     }
   }
 
+  // At most one provider attempt per URL, whether tried early or after yt-dlp.
+  let vxRedditAttempted = false;
+  const tryVxReddit = async (): Promise<DownloadResult | undefined> => {
+    if (vxRedditAttempted || process.env.VXREDDIT_FALLBACK_ENABLED === "false" || !isVxRedditSupported(normalizedUrl)) return undefined;
+    vxRedditAttempted = true;
+    try {
+      return await trace.run("vxreddit", async () => {
+        const fallback = await getVxRedditFallback(normalizedUrl);
+        if (!fallback) return undefined;
+        const files = await downloadVxRedditMedia(fallback.media, tempDir);
+        return files.length ? { files, metadata: {} as VideoMetadata, caption: fallback.caption } : undefined;
+      }, result => Boolean(result?.files.length));
+    } catch (vxRedditError: any) {
+      console.log(formatLog(ctx, `vxReddit fallback failed: ${vxRedditError.message || vxRedditError}`));
+      return undefined;
+    }
+  };
+
   let galleryDlError: Error | undefined;
 
   // Try gallery-dl first
@@ -984,7 +1002,13 @@ const processUrl = async (
     console.log(
       formatLog(ctx, `gallery-dl failed for ${normalizedUrl}: ${galleryDlError.message}`)
     );
-    // Continue to yt-dlp fallback
+    if (isDefinitiveRedditBlock(normalizedUrl, galleryDlError.message)) {
+      console.log(formatLog(ctx, "Reddit access denied; trying vxReddit before another native extractor"));
+      const rescued = await tryVxReddit();
+      if (rescued) return rescued;
+    }
+    // Transient failures retain the normal order. If early vxReddit failed,
+    // yt-dlp still gets a chance rather than turning a provider outage fatal.
   }
 
   // Fall back to yt-dlp
@@ -1015,19 +1039,8 @@ const processUrl = async (
     const ytDlpError = error instanceof Error ? error : new Error(String(error));
     const preferredError = explainDownloadFailure(normalizedUrl, ytDlpError.message);
 
-    if (process.env.VXREDDIT_FALLBACK_ENABLED !== "false" && isVxRedditSupported(normalizedUrl)) {
-      try {
-        const rescued = await trace.run("vxreddit", async () => {
-          const fallback = await getVxRedditFallback(normalizedUrl);
-          if (!fallback) return undefined;
-          const files = await downloadVxRedditMedia(fallback.media, tempDir);
-          return files.length ? { files, metadata: {} as VideoMetadata, caption: fallback.caption } : undefined;
-        }, result => Boolean(result?.files.length));
-        if (rescued) return rescued;
-      } catch (vxRedditError: any) {
-        console.log(formatLog(ctx, `vxReddit fallback failed: ${vxRedditError.message || vxRedditError}`));
-      }
-    }
+    const vxRedditRescue = await tryVxReddit();
+    if (vxRedditRescue) return vxRedditRescue;
 
     if (process.env.FXTWITTER_FALLBACK_ENABLED !== "false" && isFxTwitterUrl(normalizedUrl)) {
       try {

@@ -3,13 +3,14 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import { DownloadTrace } from '../helpers/download-attribution';
+import { isDefinitiveRedditBlock } from '../helpers/downloader-errors';
 import { isVxRedditSupported } from '../helpers/vxreddit';
 
 const main = readFileSync('src/main.ts', 'utf8');
 const code = ts.transpileModule(main.slice(main.indexOf('const processUrl = async'), main.indexOf('/**\n * Build caption')), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 function pipeline(overrides: Record<string, unknown> = {}) {
   const context = {
-    isVxRedditSupported, getVxRedditFallback: vi.fn(async () => undefined), downloadVxRedditMedia: vi.fn(async () => []),
+    isDefinitiveRedditBlock, isVxRedditSupported, getVxRedditFallback: vi.fn(async () => undefined), downloadVxRedditMedia: vi.fn(async () => []),
     DownloadTrace, isFxTwitterUrl: (url: string) => url.includes('x.com/'),
     resolveRedditShareUrl: async (url: string) => url,
     getRedditDirectMediaUrls: async () => [],
@@ -28,6 +29,60 @@ function pipeline(overrides: Record<string, unknown> = {}) {
 }
 
 describe('real processUrl attribution wiring', () => {
+  it('still runs yt-dlp if the early provider request fails', async () => {
+    const { run } = pipeline({
+      downloadWithGalleryDl: async () => { throw new Error('Login required'); },
+      getVxRedditFallback: vi.fn(async () => { throw new Error('Provider unavailable'); }),
+      processVideo: async () => ({ path: '/tmp/video.mp4', metadata: {} }),
+    });
+    const trace = new DownloadTrace();
+    await run({}, 'https://www.reddit.com/comments/1xxj8ga/', {}, '/tmp', trace);
+    expect(trace.attribution()).toMatchObject({ source: 'yt-dlp', is_fallback: true, attempts: [
+      { source: 'gallery-dl', outcome: 'failed' }, { source: 'vxreddit', outcome: 'failed' }, { source: 'yt-dlp', outcome: 'success' },
+    ] });
+  });
+  it('does not repeat an empty early provider attempt after yt-dlp also fails', async () => {
+    const { run, context } = pipeline({ downloadWithGalleryDl: async () => { throw new Error('blocked by network security'); } });
+    const trace = new DownloadTrace();
+    await expect(run({}, 'https://www.reddit.com/comments/1xxj8ga/', {}, '/tmp', trace)).rejects.toThrow();
+    expect(context.getVxRedditFallback).toHaveBeenCalledTimes(1);
+    expect(trace.attribution().attempts).toEqual([
+      { source: 'gallery-dl', outcome: 'failed' }, { source: 'vxreddit', outcome: 'empty' }, { source: 'yt-dlp', outcome: 'failed' },
+    ]);
+  });
+  it('keeps yt-dlp ahead of the provider on a transient timeout', async () => {
+    const { run, context } = pipeline({
+      downloadWithGalleryDl: async () => { throw new Error('HTTP timeout; retry exhausted'); },
+      processVideo: vi.fn(async () => ({ path: '/tmp/video.mp4', metadata: {} })),
+    });
+    await run({}, 'https://www.reddit.com/comments/1xxj8ga/', {}, '/tmp', new DownloadTrace());
+    expect(context.processVideo).toHaveBeenCalledOnce();
+    expect(context.getVxRedditFallback).not.toHaveBeenCalled();
+  });
+  it('does not bypass the provider opt-out even for a definitive block', async () => {
+    const { run, context } = pipeline({
+      downloadWithGalleryDl: async () => { throw new Error('blocked by network security'); },
+      process: { env: { VXREDDIT_FALLBACK_ENABLED: 'false' } },
+    });
+    await expect(run({}, 'https://www.reddit.com/comments/1xxj8ga/', {}, '/tmp', new DownloadTrace())).rejects.toThrow();
+    expect(context.processVideo).toHaveBeenCalledOnce();
+    expect(context.getVxRedditFallback).not.toHaveBeenCalled();
+  });
+
+  it('goes directly to vxreddit after a definitive Reddit block instead of launching yt-dlp', async () => {
+    const { run, context } = pipeline({
+      downloadWithGalleryDl: async () => { throw new Error('[reddit][error] "You have been blocked by network security."'); },
+      getVxRedditFallback: vi.fn(async () => ({ media: [{ url: 'https://i.redd.it/a.jpg', type: 'photo' }] })),
+      downloadVxRedditMedia: vi.fn(async () => [{ path: '/tmp/a.jpg', type: 'photo', size: 100 }]),
+    });
+    const trace = new DownloadTrace();
+    await run({}, 'https://www.reddit.com/comments/1xxj8ga/', {}, '/tmp', trace);
+    expect(context.processVideo).not.toHaveBeenCalled();
+    expect(trace.attribution()).toMatchObject({ source: 'vxreddit', is_fallback: true, attempts: [
+      { source: 'gallery-dl', outcome: 'failed' }, { source: 'vxreddit', outcome: 'success' },
+    ] });
+  });
+
   it('does not call vxreddit when yt-dlp succeeds on a Reddit post', async () => {
     const { run, context } = pipeline({ processVideo: async () => ({ path: '/tmp/video.mp4', metadata: {} }) });
     await run({}, 'https://www.reddit.com/comments/1xxj8ga/', {}, '/tmp', new DownloadTrace());
