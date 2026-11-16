@@ -85,11 +85,24 @@
     }
     .daily-bar {
       flex: 1;
-      background: var(--tg-theme-link-color, #2481cc);
+      background: transparent;
+      border: none;
+      padding: 0;
       border-radius: 2px 2px 0 0;
       min-height: 2px;
+      min-width: 0;
       position: relative;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
     }
+    .daily-success { background: var(--tg-theme-link-color, #2481cc); }
+    .daily-failure { background: #ff3b30; }
+    .daily-bar > span { width: 100%; flex-shrink: 0; }
+    .daily-bar > span:first-child { border-radius: 2px 2px 0 0; }
+    .daily-legend { display: flex; gap: 12px; font-size: 11px; margin-top: 8px; }
+    .daily-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+    #daily-detail { font-size: 11px; opacity: 0.7; margin-top: 6px; }
     .daily-bar:hover::after {
       content: attr(data-tip);
       position: absolute;
@@ -215,10 +228,21 @@
         html += `<div class="card"><h2>Daily Activity (30d)</h2><div class="daily-chart">`;
         for (const d of daily) {
           const pct = (d.total / maxDaily * 100).toFixed(0);
-          html += `<div class="daily-bar" style="height:${Math.max(pct, 3)}%" data-tip="${d.date}: ${d.total}"></div>`;
+          const successful = Math.max(0, Math.min(d.successful, d.total));
+          const failed = d.total - successful;
+          const successPct = d.total > 0 ? successful / d.total * 100 : 0;
+          const failurePct = d.total > 0 ? failed / d.total * 100 : 0;
+          const tip = `${d.date}: ${d.total} total · ${successful} successful (${Math.round(successPct)}%) · ${failed} failed (${Math.round(failurePct)}%)`;
+          html += `<button type="button" class="daily-bar" style="height:${Math.max(pct, 3)}%" data-tip="${tip}" aria-label="${tip}" onclick="document.getElementById('daily-detail').textContent = this.dataset.tip">
+            <span class="daily-failure" style="height:${failurePct}%"></span>
+            <span class="daily-success" style="height:${successPct}%"></span>
+          </button>`;
         }
         if (daily.length === 0) html += `<div style="opacity:0.5;margin:auto">No data yet</div>`;
-        html += `</div></div>`;
+        html += `</div><div class="daily-legend">
+          <span><i class="daily-success"></i>Success</span>
+          <span><i class="daily-failure"></i>Failed</span>
+        </div><div id="daily-detail" aria-live="polite">Tap a bar for counts and percentages.</div></div>`;
 
         // Domains
         const domains = data.domains || [];
