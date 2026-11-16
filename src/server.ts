@@ -8,6 +8,7 @@ import {
   getRecentActivity,
   getActivityByDomain,
   getDailyActivity,
+  getSourceStats,
 } from "./analytics";
 import { getCacheStats } from "./cache";
 
@@ -187,6 +188,9 @@ export function startServer(token: string, port: number = 49152): http.Server {
             break;
           case "/api/activity/daily":
             sendJson(res, getDailyActivity(30));
+            break;
+          case "/api/activity/sources":
+            sendJson(res, getSourceStats(30));
             break;
           case "/api/activity/domains":
             sendJson(res, getActivityByDomain());

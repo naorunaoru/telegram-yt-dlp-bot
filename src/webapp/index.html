@@ -185,19 +185,25 @@
       return url.length > max ? url.substring(0, max) + '…' : url;
     }
 
+    function sourceName(source) {
+      const names = { 'gallery-dl': 'gallery-dl', 'yt-dlp': 'yt-dlp', 'fxtwitter': 'FxTwitter', 'reddit-direct': 'Reddit direct' };
+      return Object.prototype.hasOwnProperty.call(names, source) ? names[source] : String(source);
+    }
+
     let currentTab = 'overview';
     let data = {};
 
     async function loadData() {
       try {
-        const [stats, chats, activity, daily, domains] = await Promise.all([
+        const [stats, chats, activity, daily, domains, sources] = await Promise.all([
           api('/api/stats'),
           api('/api/chats'),
           api('/api/activity'),
           api('/api/activity/daily'),
           api('/api/activity/domains'),
+          api('/api/activity/sources'),
         ]);
-        data = { stats, chats, activity, daily, domains };
+        data = { stats, chats, activity, daily, domains, sources };
         render();
       } catch (e) {
         document.getElementById('app').innerHTML =
@@ -258,6 +264,15 @@
         if (domains.length === 0) html += `<div style="opacity:0.5">No data yet</div>`;
         html += `</div>`;
 
+        // Source attribution starts at rollout; do not infer historical providers.
+        html += `<div class="card"><h2>Download Backends (30d)</h2>`;
+        for (const b of data.sources || []) {
+          html += `<div class="activity-item"><div class="chat-name">${escHtml(sourceName(b.source))}</div>
+            <div class="chat-meta">${b.attempts} attempts · ${b.successful} successful · ${b.rescued} rescued · ${b.failed} unsuccessful</div></div>`;
+        }
+        if (!(data.sources || []).length) html += `<div class="chat-meta">No tracked attempts yet.</div>`;
+        html += `<div class="chat-meta" style="margin-top:8px">Rescued = succeeded after an earlier backend failed or returned no media. Historical events and cache hits are excluded.</div></div>`;
+
         // Cache stats
         if (s.cache) {
           html += `<div class="card"><h2>Cache</h2>
@@ -284,6 +299,10 @@
             ${escHtml(a.chat_title || String(a.chat_id))} · ${timeAgo(a.timestamp)}
             ${a.file_count > 0 ? ' · ' + a.file_count + ' files' : ''}</div>
             <div class="url-text">${escHtml(truncUrl(a.url))}</div>
+            <div class="chat-meta">${a.source
+              ? escHtml((a.success && a.is_fallback ? 'Rescued by ' : 'Downloaded via ') + sourceName(a.source))
+              : (a.attempts?.length ? 'No successful backend' : 'Source unknown')}</div>
+            ${a.attempts?.length ? '<div class="chat-meta">' + escHtml(a.attempts.map(t => sourceName(t.source) + ': ' + t.outcome).join(' → ')) + '</div>' : ''}
             ${a.error_message ? '<div style="color:#ff3b30;font-size:11px">' + escHtml(a.error_message.substring(0, 100)) + '</div>' : ''}
           </div>`;
         }

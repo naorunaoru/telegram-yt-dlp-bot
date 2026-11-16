@@ -14,7 +14,8 @@ import { getYtDlpCliOptionsFromEnv } from "./helpers/ytdlp-options";
 import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddit";
 import { explainDownloadFailure } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
-import { getFxTwitterFallback } from "./helpers/fxtwitter";
+import { getFxTwitterFallback, isFxTwitterUrl } from "./helpers/fxtwitter";
+import { DownloadTrace } from "./helpers/download-attribution";
 import { VideoMetadata } from "./types";
 import {
   initCache,
@@ -940,7 +941,8 @@ const processUrl = async (
   ctx: Context,
   url: string,
   pattern: (typeof patterns)[0],
-  tempDir: string
+  tempDir: string,
+  trace = new DownloadTrace()
 ): Promise<DownloadResult> => {
   const normalizedUrl = await resolveRedditShareUrl(url);
   if (normalizedUrl !== url) {
@@ -957,7 +959,7 @@ const processUrl = async (
     );
 
     try {
-      const directResult = await downloadDirectMediaUrls(ctx, directRedditMediaUrls, tempDir);
+      const directResult = await trace.run("reddit-direct", () => downloadDirectMediaUrls(ctx, directRedditMediaUrls, tempDir), result => Boolean(result?.files.length));
       if (directResult) {
         return directResult;
       }
@@ -972,7 +974,7 @@ const processUrl = async (
 
   // Try gallery-dl first
   try {
-    const result = await downloadWithGalleryDl(ctx, normalizedUrl, tempDir);
+    const result = await trace.run("gallery-dl", () => downloadWithGalleryDl(ctx, normalizedUrl, tempDir), result => result.files.length > 0);
     if (result.files.length > 0) {
       return result;
     }
@@ -988,7 +990,11 @@ const processUrl = async (
   console.log(formatLog(ctx, `Falling back to yt-dlp for ${normalizedUrl}`));
 
   try {
-    const { path: videoPath, metadata } = await processVideo(ctx, normalizedUrl, pattern, tempDir);
+    const { path: videoPath, metadata } = await trace.run("yt-dlp", async () => {
+      const result = await processVideo(ctx, normalizedUrl, pattern, tempDir);
+      fs.statSync(result.path);
+      return result;
+    }, result => Boolean(result.path));
 
     const stats = fs.statSync(videoPath);
     return {
@@ -1008,29 +1014,33 @@ const processUrl = async (
     const ytDlpError = error instanceof Error ? error : new Error(String(error));
     const preferredError = explainDownloadFailure(normalizedUrl, ytDlpError.message);
 
-    if (process.env.FXTWITTER_FALLBACK_ENABLED !== "false") {
+    if (process.env.FXTWITTER_FALLBACK_ENABLED !== "false" && isFxTwitterUrl(normalizedUrl)) {
       try {
-        const fxTwitter = await getFxTwitterFallback(normalizedUrl, {
-          apiBaseUrl: process.env.FXTWITTER_API_BASE_URL,
-          signal: AbortSignal.timeout(15_000),
-        });
+        const rescued = await trace.run("fxtwitter", async () => {
+          const fxTwitter = await getFxTwitterFallback(normalizedUrl, {
+            apiBaseUrl: process.env.FXTWITTER_API_BASE_URL,
+            signal: AbortSignal.timeout(15_000),
+          });
 
-        if (fxTwitter) {
-          console.log(
-            formatLog(
+          if (fxTwitter) {
+            console.log(
+              formatLog(
+                ctx,
+                `FxTwitter resolved ${fxTwitter.mediaUrls.length} direct media URL${fxTwitter.mediaUrls.length === 1 ? "" : "s"}`
+              )
+            );
+            const directResult = await downloadDirectMediaUrls(
               ctx,
-              `FxTwitter resolved ${fxTwitter.mediaUrls.length} direct media URL${fxTwitter.mediaUrls.length === 1 ? "" : "s"}`
-            )
-          );
-          const directResult = await downloadDirectMediaUrls(
-            ctx,
-            fxTwitter.mediaUrls,
-            tempDir
-          );
-          if (directResult) {
-            return { ...directResult, caption: fxTwitter.caption };
+              fxTwitter.mediaUrls,
+              tempDir
+            );
+            if (directResult) {
+              return { ...directResult, caption: fxTwitter.caption };
+            }
           }
-        }
+          return undefined;
+        }, result => Boolean(result?.files.length));
+        if (rescued) return rescued;
       } catch (fxTwitterError: any) {
         console.log(
           formatLog(
@@ -1104,6 +1114,7 @@ bot.on(message("text"), async (ctx) => {
   trackChatActivity(ctx);
 
   const tempDir = createTempDir();
+  const traces = matches.map(() => new DownloadTrace());
 
   // Keep sending typing indicator while processing (expires after 5s)
   const chatActionInterval = setInterval(() => {
@@ -1128,7 +1139,7 @@ bot.on(message("text"), async (ctx) => {
         console.log(formatLog(ctx, `Cache invalid for ${url}, re-downloading`));
       }
 
-      const result = await processUrl(ctx, url, pattern, tempDir);
+      const result = await processUrl(ctx, url, pattern, tempDir, traces[0]);
 
       // Convert GIFs to MP4 for proper animation support
       const processedFiles = await processMediaFiles(result.files);
@@ -1137,6 +1148,11 @@ bot.on(message("text"), async (ctx) => {
       const validFiles = filterByTelegramLimits(processedFiles, ctx);
 
       if (validFiles.length === 0) {
+        try {
+          logEvent({ url, domain: extractDomain(url), chat_id: ctx.chat!.id,
+            chat_title: getChatTitle(ctx), user_id: ctx.from!.id, success: false, file_count: 0,
+            error_message: "All files exceed Telegram size limits", ...traces[0].attribution() });
+        } catch (e) { /* non-critical */ }
         if (isVerbose(ctx)) {
           await ctx.reply("All files exceed Telegram size limits.");
         }
@@ -1171,6 +1187,7 @@ bot.on(message("text"), async (ctx) => {
           user_id: ctx.from!.id,
           success: true,
           file_count: validFiles.length,
+          ...traces[0].attribution(),
         });
       } catch (e) { /* non-critical */ }
     } else {
@@ -1182,7 +1199,7 @@ bot.on(message("text"), async (ctx) => {
       }
 
       const results = await Promise.allSettled(
-        matches.map(({ url, pattern }) => processUrl(ctx, url, pattern, tempDir))
+        matches.map(({ url, pattern }, index) => processUrl(ctx, url, pattern, tempDir, traces[index]))
       );
 
       // Collect all successful files with their result info
@@ -1224,22 +1241,28 @@ bot.on(message("text"), async (ctx) => {
         return true;
       });
 
-      if (validItems.length > 0) {
-        // Group files into albums
-        const files = validItems.map((item) => item.file);
+      let deliveryError: Error | undefined;
+      try {
+        if (validItems.length > 0) {
+          // Group files into albums
+          const files = validItems.map((item) => item.file);
 
-        // Convert GIFs to MP4 for proper animation support
-        const processedFiles = await processMediaFiles(files);
+          // Convert GIFs to MP4 for proper animation support
+          const processedFiles = await processMediaFiles(files);
 
-        // Use first item for caption
-        const firstItem = validItems[0];
-        const caption = buildCaption(
-          firstItem.result,
-          firstItem.pattern,
-          firstItem.url
-        );
+          // Use first item for caption
+          const firstItem = validItems[0];
+          const caption = buildCaption(
+            firstItem.result,
+            firstItem.pattern,
+            firstItem.url
+          );
 
-        await sendMediaAlbum(ctx, processedFiles, ctx.message.message_id, caption);
+          await sendMediaAlbum(ctx, processedFiles, ctx.message.message_id, caption);
+        }
+
+      } catch (error) {
+        deliveryError = error instanceof Error ? error : new Error(String(error));
       }
 
       // Log events for each URL result
@@ -1247,14 +1270,17 @@ bot.on(message("text"), async (ctx) => {
         try {
           const matchUrl = matches[index].url;
           if (promiseResult.status === "fulfilled") {
+            const acceptedCount = deliveryError ? 0 : validItems.filter(item => item.result === promiseResult.value).length;
             logEvent({
               url: matchUrl,
               domain: extractDomain(matchUrl),
               chat_id: ctx.chat!.id,
               chat_title: getChatTitle(ctx),
               user_id: ctx.from!.id,
-              success: true,
-              file_count: promiseResult.value.files.length,
+              success: acceptedCount > 0,
+              file_count: acceptedCount,
+              error_message: deliveryError?.message.substring(0, 500) ?? (acceptedCount > 0 ? undefined : "No files within Telegram size limits"),
+              ...traces[index].attribution(),
             });
           } else {
             logEvent({
@@ -1266,10 +1292,13 @@ bot.on(message("text"), async (ctx) => {
               success: false,
               file_count: 0,
               error_message: String(promiseResult.reason?.message || promiseResult.reason).substring(0, 500),
+              ...traces[index].attribution(),
             });
           }
         } catch (e) { /* non-critical */ }
       });
+
+      if (deliveryError) throw deliveryError;
 
       // Report failures
       const failedDownloads = results
@@ -1314,6 +1343,7 @@ bot.on(message("text"), async (ctx) => {
           success: false,
           file_count: 0,
           error_message: String(error.message || error).substring(0, 500),
+          ...traces[0].attribution(),
         });
       } catch (e) { /* non-critical */ }
     }

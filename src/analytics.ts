@@ -1,13 +1,14 @@
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import { DownloadAttribution, DownloadAttempt } from "./helpers/download-attribution";
 
 let db: Database.Database | null = null;
 
 /**
  * Parameters for logging a download event
  */
-export interface LogEventParams {
+export interface LogEventParams extends DownloadAttribution {
   url: string;
   domain: string;
   chat_id: number;
@@ -78,6 +79,12 @@ export function initAnalytics(dbPath: string): void {
     CREATE INDEX IF NOT EXISTS idx_events_chat_id ON events(chat_id);
   `);
 
+  // Additive migration: old events deliberately retain unknown attribution.
+  const columns = new Set((db.prepare("PRAGMA table_info(events)").all() as { name: string }[]).map(c => c.name));
+  for (const [name, type] of [["source", "TEXT"], ["is_fallback", "INTEGER"], ["attempts_json", "TEXT"]]) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
+  }
+
   console.log("Analytics initialized");
 }
 
@@ -100,8 +107,8 @@ export function logEvent(params: LogEventParams): void {
 
   database
     .prepare(
-      `INSERT INTO events (url, domain, chat_id, chat_title, user_id, timestamp, success, file_count, error_message)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO events (url, domain, chat_id, chat_title, user_id, timestamp, success, file_count, error_message, source, is_fallback, attempts_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       params.url,
@@ -112,7 +119,10 @@ export function logEvent(params: LogEventParams): void {
       now,
       params.success ? 1 : 0,
       params.file_count,
-      params.error_message ?? null
+      params.error_message ?? null,
+      params.source ?? null,
+      params.is_fallback == null ? null : Number(params.is_fallback),
+      params.attempts == null ? null : JSON.stringify(params.attempts)
     );
 
   // Update chat download count
@@ -220,16 +230,24 @@ export function getRecentActivity(
   success: boolean;
   file_count: number;
   error_message: string | null;
+  source: string | null;
+  is_fallback: boolean | null;
+  attempts: DownloadAttempt[] | null;
 }> {
   const database = getDb();
   const rows = database
     .prepare(
-      `SELECT url, domain, chat_id, chat_title, user_id, timestamp, success, file_count, error_message
+      `SELECT url, domain, chat_id, chat_title, user_id, timestamp, success, file_count, error_message, source, is_fallback, attempts_json
        FROM events ORDER BY timestamp DESC LIMIT ?`
     )
     .all(limit) as any[];
 
-  return rows.map((r) => ({ ...r, success: r.success === 1 }));
+  return rows.map(({ attempts_json, ...r }) => ({
+    ...r,
+    success: r.success === 1,
+    is_fallback: r.is_fallback == null ? null : r.is_fallback === 1,
+    attempts: attempts_json == null ? null : JSON.parse(attempts_json),
+  }));
 }
 
 /**
@@ -270,6 +288,24 @@ export function getDailyActivity(
        ORDER BY date ASC`
     )
     .all(since) as any;
+}
+
+/** Backend attempts and delivered successes during the last N days. */
+export function getSourceStats(days: number = 30): Array<{
+  source: string; attempts: number; successful: number; rescued: number; failed: number;
+}> {
+  return getDb().prepare(`
+    SELECT json_extract(a.value, '$.source') AS source,
+      COUNT(*) AS attempts,
+      SUM(CASE WHEN json_extract(a.value, '$.outcome') = 'success'
+        AND e.success = 1 AND e.source = json_extract(a.value, '$.source') THEN 1 ELSE 0 END) AS successful,
+      SUM(CASE WHEN json_extract(a.value, '$.outcome') = 'success'
+        AND e.success = 1 AND e.is_fallback = 1 AND e.source = json_extract(a.value, '$.source') THEN 1 ELSE 0 END) AS rescued,
+      SUM(CASE WHEN json_extract(a.value, '$.outcome') IN ('failed', 'empty') THEN 1 ELSE 0 END) AS failed
+    FROM events e, json_each(e.attempts_json) a
+    WHERE e.timestamp >= ?
+    GROUP BY json_extract(a.value, '$.source') ORDER BY source
+  `).all(Date.now() - days * 24 * 60 * 60 * 1000) as any;
 }
 
 /**
