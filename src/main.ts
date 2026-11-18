@@ -1155,10 +1155,16 @@ bot.on(message("text"), async (ctx) => {
       const { url, pattern } = matches[0];
       console.log(formatLog(ctx, `Processing URL: ${url}`));
 
+      // Cache Reddit share URLs under their canonical target. Besides
+      // deduplicating multiple share links for the same post/comment, this
+      // prevents stale entries created before comment-media support from
+      // continuing to return the parent post.
+      const cacheUrl = await resolveRedditShareUrl(url);
+
       // Check cache first
-      const cached = getCachedMedia(url);
+      const cached = getCachedMedia(cacheUrl);
       if (cached && cached.files.length > 0) {
-        console.log(formatLog(ctx, `Cache hit for ${url}`));
+        console.log(formatLog(ctx, `Cache hit for ${cacheUrl}`));
         const sent = await sendCachedMedia(ctx, cached, ctx.message.message_id);
         if (sent) {
           return; // Cache hit successful
@@ -1194,7 +1200,7 @@ bot.on(message("text"), async (ctx) => {
       if (extractedFiles.length > 0) {
         try {
           setCachedMedia({
-            url,
+            url: cacheUrl,
             files: extractedFiles,
             caption,
             metadata: result.metadata,
