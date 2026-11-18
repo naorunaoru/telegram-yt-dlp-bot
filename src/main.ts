@@ -16,6 +16,7 @@ import { explainDownloadFailure, isDefinitiveRedditBlock } from "./helpers/downl
 import { reactSadOnFailure } from "./helpers/reactions";
 import { getFxTwitterFallback, isFxTwitterUrl } from "./helpers/fxtwitter";
 import { DownloadTrace } from "./helpers/download-attribution";
+import { isTelegramServerError, withTelegramRetry } from "./helpers/telegram-retry";
 import { getVxRedditFallback, downloadVxRedditMedia, isVxRedditSupported } from "./helpers/vxreddit";
 import { VideoMetadata } from "./types";
 import {
@@ -753,6 +754,14 @@ const extractFileIdFromMessage = (
  * Send cached media using Telegram file_ids
  * Returns true if successful, false if cache should be invalidated
  */
+const retryTelegramSend = <T>(ctx: Context, method: string, send: () => Promise<T>): Promise<T> =>
+  withTelegramRetry(send, {
+    onRetry: (code, retry, delayMs) => {
+      // Log metadata only: Telegram error objects can contain tokens and upload payloads.
+      console.warn(formatLog(ctx, `${method}: Telegram ${code}; retry ${retry}/3 in ${delayMs}ms`));
+    },
+  });
+
 const sendCachedMedia = async (
   ctx: Context,
   cached: CachedEntry,
@@ -766,21 +775,21 @@ const sendCachedMedia = async (
     if (files.length === 1) {
       const file = files[0];
       if (file.file_type === "photo") {
-        await ctx.replyWithPhoto(file.telegram_file_id, {
+        await retryTelegramSend(ctx, "sendPhoto (cached)", () => ctx.replyWithPhoto(file.telegram_file_id, {
           caption,
           reply_to_message_id: replyToMessageId,
-        } as any);
+        } as any));
       } else if (file.file_type === "animation") {
-        await ctx.replyWithAnimation(file.telegram_file_id, {
+        await retryTelegramSend(ctx, "sendAnimation (cached)", () => ctx.replyWithAnimation(file.telegram_file_id, {
           caption,
           reply_to_message_id: replyToMessageId,
-        } as any);
+        } as any));
       } else {
-        await ctx.replyWithVideo(file.telegram_file_id, {
+        await retryTelegramSend(ctx, "sendVideo (cached)", () => ctx.replyWithVideo(file.telegram_file_id, {
           caption,
           reply_to_message_id: replyToMessageId,
           supports_streaming: true,
-        } as any);
+        } as any));
       }
       return true;
     }
@@ -811,13 +820,15 @@ const sendCachedMedia = async (
         }
       });
 
-      await ctx.replyWithMediaGroup(mediaGroup, {
+      await retryTelegramSend(ctx, "sendMediaGroup (cached)", () => ctx.replyWithMediaGroup(mediaGroup, {
         reply_to_message_id: replyToMessageId,
-      } as any);
+      } as any));
     }
 
     return true;
   } catch (error: any) {
+    // A server outage does not invalidate cached file IDs or justify a re-download.
+    if (isTelegramServerError(error)) throw error;
     // File_id might be invalid (expired or from different bot)
     console.error(`Cache send failed: ${error.message}`);
     return false;
@@ -845,25 +856,25 @@ const sendMediaAlbum = async (
     let msg: TelegramMediaMessage;
 
     if (file.type === "photo") {
-      msg = await ctx.replyWithPhoto(
-        { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
+      msg = await retryTelegramSend(ctx, "sendPhoto", () => ctx.replyWithPhoto(
+        { source: file.path, filename: path.basename(file.path) },
         {
           caption,
           reply_to_message_id: replyToMessageId,
         } as any
-      );
+      ));
     } else {
-      msg = await ctx.replyWithVideo(
-        { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
+      msg = await retryTelegramSend(ctx, "sendVideo", () => ctx.replyWithVideo(
+        { source: file.path, filename: path.basename(file.path) },
         {
           caption,
           reply_to_message_id: replyToMessageId,
           supports_streaming: true,
           width: file.width,
           height: file.height,
-          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath), filename: path.basename(file.thumbnailPath) } }),
+          ...(file.thumbnailPath && { thumbnail: { source: file.thumbnailPath, filename: path.basename(file.thumbnailPath) } }),
         } as any
-      );
+      ));
     }
 
     const extracted = extractFileIdFromMessage(msg, 0);
@@ -879,32 +890,34 @@ const sendMediaAlbum = async (
     const chunk = chunks[i];
     const isFirstAlbum = i === 0;
 
-    const mediaGroup = chunk.map((file, index) => {
-      const itemCaption = isFirstAlbum && index === 0 ? caption : undefined;
+    const messages = (await retryTelegramSend(ctx, "sendMediaGroup", () => {
+      // File paths let Telegraf open fresh streams for every attempt, including thumbnails.
+      const mediaGroup = chunk.map((file, index) => {
+        const itemCaption = isFirstAlbum && index === 0 ? caption : undefined;
 
-      if (file.type === "photo") {
-        return {
-          type: "photo" as const,
-          media: { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
-          caption: itemCaption,
-        };
-      } else {
-        return {
-          type: "video" as const,
-          media: { source: fs.createReadStream(file.path), filename: path.basename(file.path) },
-          caption: itemCaption,
-          supports_streaming: true,
-          width: file.width,
-          height: file.height,
-          ...(file.thumbnailPath && { thumbnail: { source: fs.createReadStream(file.thumbnailPath), filename: path.basename(file.thumbnailPath) } }),
-        };
-      }
-    });
+        if (file.type === "photo") {
+          return {
+            type: "photo" as const,
+            media: { source: file.path, filename: path.basename(file.path) },
+            caption: itemCaption,
+          };
+        } else {
+          return {
+            type: "video" as const,
+            media: { source: file.path, filename: path.basename(file.path) },
+            caption: itemCaption,
+            supports_streaming: true,
+            width: file.width,
+            height: file.height,
+            ...(file.thumbnailPath && { thumbnail: { source: file.thumbnailPath, filename: path.basename(file.thumbnailPath) } }),
+          };
+        }
+      });
 
-    // replyWithMediaGroup returns an array of messages
-    const messages = (await ctx.replyWithMediaGroup(mediaGroup, {
-      reply_to_message_id: replyToMessageId,
-    } as any)) as TelegramMediaMessage[];
+      return ctx.replyWithMediaGroup(mediaGroup, {
+        reply_to_message_id: replyToMessageId,
+      } as any);
+    })) as TelegramMediaMessage[];
 
     // Extract file_ids from each message
     for (const msg of messages) {
