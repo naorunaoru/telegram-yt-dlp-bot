@@ -166,10 +166,13 @@ export function getCachedMedia(url: string): CachedEntry | null {
   };
 }
 
-/**
- * Store cached media for a URL
- * Overwrites any existing entry for the same URL
- */
+/** Refresh the caption without rewriting file IDs or overwriting a concurrent update. */
+export function updateCachedCaption(url: string, previous: string | undefined, caption: string): void {
+  db?.prepare('UPDATE cache_entries SET caption = ? WHERE url = ? AND caption IS ?')
+    .run(caption, url, previous ?? null);
+}
+
+/** Store cached media for a URL, overwriting any existing entry for it. */
 export function setCachedMedia(params: SetCachedMediaParams): void {
   const database = getDb();
   const { url, files, caption, metadata } = params;

@@ -13,6 +13,7 @@
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "dotenv": "^16.4.5",
+    "parse5": "7.3.0",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
