@@ -15,6 +15,7 @@ import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddi
 import { explainDownloadFailure, isDefinitiveRedditBlock } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
 import { getFxTwitterFallback, isFxTwitterUrl } from "./helpers/fxtwitter";
+import { getXOEmbedText } from "./helpers/x-oembed";
 import { DownloadTrace } from "./helpers/download-attribution";
 import { isTelegramServerError, withTelegramRetry } from "./helpers/telegram-retry";
 import { getVxRedditFallback, downloadVxRedditMedia, isVxRedditSupported } from "./helpers/vxreddit";
@@ -23,6 +24,7 @@ import {
   initCache,
   getCachedMedia,
   setCachedMedia,
+  updateCachedCaption,
   CachedFile,
   CachedEntry,
 } from "./cache";
@@ -1107,41 +1109,38 @@ const processUrl = async (
  * Build caption for a download result
  * Handles gallery-dl captions, yt-dlp metadata, and partial success notes
  */
-const buildCaption = (
+const buildCaption = async (
   result: DownloadResult,
   pattern: (typeof patterns)[0],
   url: string
-): string | undefined => {
-  let caption: string | undefined;
+): Promise<string> => {
+  const text = result.caption?.trim();
+  const caption = text && text !== url
+    ? appendCaptionLink(text, url)
+    : (await enrichLinkCaption(formatMetadata(result.metadata, pattern, url), url) ?? url);
+  return result.partialSuccess ? `${caption}${PARTIAL_CAPTION_SUFFIX}` : caption;
+};
 
-  // Prefer gallery-dl caption if available
-  if (result.caption) {
-    // Append URL to gallery-dl caption for reference when forwarded
-    // Reserve space for URL + newlines, truncate caption text first
-    const urlSuffix = `\n\n${url}`;
-    const maxCaptionLength = 250 - urlSuffix.length;
-    const truncatedCaption = truncateWithEllipsis(result.caption, {
-      maxLength: maxCaptionLength,
-      ellipsis: " ...",
-      preserveWords: true,
-    });
-    caption = truncatedCaption ? `${truncatedCaption}${urlSuffix}` : url;
-  } else {
-    // Fall back to yt-dlp style metadata formatting (already includes URL)
-    caption = formatMetadata(result.metadata, pattern, url);
-  }
+const PARTIAL_CAPTION_SUFFIX = "\n\n(some content could not be downloaded)";
 
-  // If still no caption, at least include the URL for reference
-  if (!caption) {
-    caption = url;
-  }
+const appendCaptionLink = (text: string, url: string): string => {
+  const suffix = `\n\n${url}`;
+  const truncated = truncateWithEllipsis(text, {
+    maxLength: 250 - suffix.length,
+    ellipsis: " ...",
+    preserveWords: true,
+  });
+  return truncated ? `${truncated}${suffix}` : url;
+};
 
-  // Append partial success note if applicable
-  if (result.partialSuccess) {
-    caption = `${caption}\n\n(some content could not be downloaded)`;
-  }
-
-  return caption;
+const enrichLinkCaption = async (caption: string | undefined, url: string): Promise<string | undefined> => {
+  const current = caption?.trim();
+  const partial = current === url + PARTIAL_CAPTION_SUFFIX;
+  if (current && current !== url && !partial) return caption;
+  const text = await getXOEmbedText(url);
+  if (!text) return caption;
+  const enriched = appendCaptionLink(text, url);
+  return partial ? enriched + PARTIAL_CAPTION_SUFFIX : enriched;
 };
 
 bot.on(message("text"), async (ctx) => {
@@ -1172,8 +1171,16 @@ bot.on(message("text"), async (ctx) => {
       const cached = getCachedMedia(url);
       if (cached && cached.files.length > 0) {
         console.log(formatLog(ctx, `Cache hit for ${url}`));
-        const sent = await sendCachedMedia(ctx, cached, ctx.message.message_id);
+        const caption = await enrichLinkCaption(cached.caption, url);
+        const sent = await sendCachedMedia(ctx, { ...cached, caption }, ctx.message.message_id);
         if (sent) {
+          if (caption && caption !== url && caption !== cached.caption) {
+            try {
+              updateCachedCaption(url, cached.caption, caption);
+            } catch (error: any) {
+              console.log(formatLog(ctx, `Cache caption update failed: ${error.message}`));
+            }
+          }
           return; // Cache hit successful
         }
         // Cache send failed, fall through to re-download
@@ -1200,7 +1207,7 @@ bot.on(message("text"), async (ctx) => {
         return;
       }
 
-      const caption = buildCaption(result, pattern, url);
+      const caption = await buildCaption(result, pattern, url);
       const extractedFiles = await sendMediaAlbum(ctx, validFiles, ctx.message.message_id, caption);
 
       // Cache the file_ids for future requests
@@ -1293,7 +1300,7 @@ bot.on(message("text"), async (ctx) => {
 
           // Use first item for caption
           const firstItem = validItems[0];
-          const caption = buildCaption(
+          const caption = await buildCaption(
             firstItem.result,
             firstItem.pattern,
             firstItem.url
