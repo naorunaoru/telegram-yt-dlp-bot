@@ -5,13 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { DownloadTrace } from '../helpers/download-attribution';
 import { isDefinitiveRedditBlock } from '../helpers/downloader-errors';
 import { isVxRedditSupported } from '../helpers/vxreddit';
+import { getRedditComment, isRedditShareUrl } from '../helpers/reddit';
 
 const main = readFileSync('src/main.ts', 'utf8');
 const code = ts.transpileModule(main.slice(main.indexOf('const processUrl = async'), main.indexOf('/**\n * Build caption')), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 function pipeline(overrides: Record<string, unknown> = {}) {
   const context = {
     isDefinitiveRedditBlock, isVxRedditSupported, getVxRedditFallback: vi.fn(async () => undefined), downloadVxRedditMedia: vi.fn(async () => []),
-    DownloadTrace, isFxTwitterUrl: (url: string) => url.includes('x.com/'),
+    DownloadTrace, getRedditComment, isRedditShareUrl, isFxTwitterUrl: (url: string) => url.includes('x.com/'),
     resolveRedditShareUrl: async (url: string) => url,
     getRedditDirectMediaUrls: async () => [],
     downloadWithGalleryDl: vi.fn(async () => { throw new Error('gallery failed'); }),
@@ -29,6 +30,39 @@ function pipeline(overrides: Record<string, unknown> = {}) {
 }
 
 describe('real processUrl attribution wiring', () => {
+  it.each([true, false])('does not run parent-post extractors on unresolved share links (mirror succeeds: %s)', async rescued => {
+    const share = 'https://www.reddit.com/r/youll_be_banned/s/Bd5rDiyc6b';
+    const photo = { path: '/tmp/comment.jpg', type: 'photo', size: 100 };
+    const { run, context } = pipeline({
+      downloadWithGalleryDl: vi.fn(async () => ({ files: ['parent'], metadata: {} })),
+      getVxRedditFallback: vi.fn(async () => rescued ? { media: [{ url: 'https://preview.redd.it/photo.jpeg', type: 'photo' }] } : undefined),
+      downloadVxRedditMedia: async () => [photo],
+    });
+    const result = run({}, share, {}, '/tmp', new DownloadTrace());
+    if (rescued) await expect(result).resolves.toMatchObject({ files: [photo] });
+    else await expect(result).rejects.toThrow('Could not resolve');
+    expect(context.getVxRedditFallback).toHaveBeenCalledWith(share);
+    expect(context.downloadWithGalleryDl).not.toHaveBeenCalled();
+    expect(context.processVideo).not.toHaveBeenCalled();
+  });
+
+  it('tries the exact Reddit comment directly, then via vxreddit, without risking parent media', async () => {
+    const comment = 'https://www.reddit.com/r/youll_be_banned/comments/1y1mcuu/comment/19syb90anb7r7/';
+    const getRedditDirectMediaUrls = vi.fn(async () => []);
+    const getVxRedditFallback = vi.fn(async () => ({ media: [{ url: 'https://preview.redd.it/photo.jpeg', type: 'photo' }] }));
+    const photo = { path: '/tmp/comment.jpg', type: 'photo', size: 100 };
+    const { run, context } = pipeline({ getRedditDirectMediaUrls, getVxRedditFallback, downloadVxRedditMedia: async () => [photo] });
+    const trace = new DownloadTrace();
+    expect((await run({}, comment, {}, '/tmp', trace)).files).toEqual([photo]);
+    expect(getRedditDirectMediaUrls).toHaveBeenCalledWith(comment);
+    expect(getVxRedditFallback).toHaveBeenCalledWith(comment);
+    expect(context.downloadWithGalleryDl).not.toHaveBeenCalled();
+    expect(context.processVideo).not.toHaveBeenCalled();
+    expect(trace.attribution()).toEqual({ source: 'vxreddit', is_fallback: true, attempts: [
+      { source: 'reddit-direct', outcome: 'empty' }, { source: 'vxreddit', outcome: 'success' },
+    ] });
+  });
+
   it('still runs yt-dlp if the early provider request fails', async () => {
     const { run } = pipeline({
       downloadWithGalleryDl: async () => { throw new Error('Login required'); },

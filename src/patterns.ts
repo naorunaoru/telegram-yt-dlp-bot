@@ -59,7 +59,7 @@ const bilibiliPattern: PatternConfig = {
 
 const redditPattern: PatternConfig = {
   regex:
-    /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?:(?:r|user)\/[^/]+\/)?(?:(?:comments\/[^/]+\/[^/]+)|(?:s\/[^/?#&]+))/gi,
+    /https?:\/\/(?:(?:www|old|m)\.)?reddit(?:media)?\.com\/(?:(?:r|u|user)\/[\w-]+\/)?(?:comments\/[a-z0-9]+(?:\/[^/\s?#&<>"'()[\]]+(?:\/[a-z0-9]+)?)?|s\/[a-z0-9]+)\/?(?![\w/-])/gi,
   flags: [
     // doesn't work with size limits somehow?
     "-f",

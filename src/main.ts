@@ -11,7 +11,7 @@ import { patterns } from "./patterns";
 import { truncateWithEllipsis } from "./helpers/text";
 import { getGalleryDlCliOptionsFromEnv } from "./helpers/gallerydl";
 import { getYtDlpCliOptionsFromEnv } from "./helpers/ytdlp-options";
-import { getRedditDirectMediaUrls, resolveRedditShareUrl } from "./helpers/reddit";
+import { getRedditComment, getRedditDirectMediaUrls, isRedditShareUrl, redditMediaCacheKey, resolveRedditShareUrl } from "./helpers/reddit";
 import { explainDownloadFailure, isDefinitiveRedditBlock } from "./helpers/downloader-errors";
 import { reactSadOnFailure } from "./helpers/reactions";
 import { getFxTwitterFallback, isFxTwitterUrl } from "./helpers/fxtwitter";
@@ -965,7 +965,9 @@ const processUrl = async (
     console.log(formatLog(ctx, `Resolved Reddit share URL: ${url} -> ${normalizedUrl}`));
   }
 
-  const directRedditMediaUrls = await getRedditDirectMediaUrls(normalizedUrl);
+  const comment = getRedditComment(normalizedUrl);
+  const unresolvedShare = isRedditShareUrl(normalizedUrl);
+  const directRedditMediaUrls = comment || unresolvedShare ? [] : await getRedditDirectMediaUrls(normalizedUrl);
   if (directRedditMediaUrls.length > 0) {
     console.log(
       formatLog(
@@ -1003,6 +1005,29 @@ const processUrl = async (
       return undefined;
     }
   };
+
+  if (comment) {
+    // Generic Reddit extractors can return the parent post instead of the comment.
+    try {
+      const direct = await trace.run("reddit-direct", async () => {
+        const urls = await getRedditDirectMediaUrls(normalizedUrl);
+        return urls.length ? downloadDirectMediaUrls(ctx, urls, tempDir) : undefined;
+      }, result => Boolean(result?.files.length));
+      if (direct?.files.length) return direct;
+    } catch (error) {
+      console.log(formatLog(ctx, `Direct Reddit comment download failed: ${error instanceof Error ? error.name : 'unknown error'}`));
+    }
+    const rescued = await tryVxReddit();
+    if (rescued) return rescued;
+    throw new Error("No downloadable media found in this Reddit comment.");
+  }
+
+  if (unresolvedShare) {
+    // Without a permalink, generic extractors cannot distinguish a comment from its parent.
+    const rescued = await tryVxReddit();
+    if (rescued) return rescued;
+    throw new Error("Could not resolve this Reddit share link. Try the full Reddit permalink.");
+  }
 
   let galleryDlError: Error | undefined;
 
@@ -1168,7 +1193,8 @@ bot.on(message("text"), async (ctx) => {
       console.log(formatLog(ctx, `Processing URL: ${url}`));
 
       // Check cache first
-      const cached = getCachedMedia(url);
+      const cacheKey = redditMediaCacheKey(url);
+      const cached = getCachedMedia(cacheKey);
       if (cached && cached.files.length > 0) {
         console.log(formatLog(ctx, `Cache hit for ${url}`));
         const caption = await enrichLinkCaption(cached.caption, url);
@@ -1176,7 +1202,7 @@ bot.on(message("text"), async (ctx) => {
         if (sent) {
           if (caption && caption !== url && caption !== cached.caption) {
             try {
-              updateCachedCaption(url, cached.caption, caption);
+              updateCachedCaption(cacheKey, cached.caption, caption);
             } catch (error: any) {
               console.log(formatLog(ctx, `Cache caption update failed: ${error.message}`));
             }
@@ -1214,7 +1240,7 @@ bot.on(message("text"), async (ctx) => {
       if (extractedFiles.length > 0) {
         try {
           setCachedMedia({
-            url,
+            url: cacheKey,
             files: extractedFiles,
             caption,
             metadata: result.metadata,

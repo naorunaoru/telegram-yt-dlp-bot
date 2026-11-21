@@ -3,6 +3,7 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { expect, it, vi } from 'vitest';
 import { DownloadTrace } from '../helpers/download-attribution';
+import { redditMediaCacheKey } from '../helpers/reddit';
 
 const main = readFileSync('src/main.ts', 'utf8');
 const code = ts.transpileModule(main.slice(main.indexOf('const buildCaption ='), main.indexOf('bot.on(message("text")')), {
@@ -34,7 +35,7 @@ it.each([[true, ''], [false, ''], [true, '\n\n(some content could not be downloa
     getXOEmbedText: async () => available ? 'Recovered' : undefined,
     truncateWithEllipsis: (text: string) => text,
     findAllMatches: () => [{ url, pattern: {} }], DownloadTrace,
-    getCachedMedia: () => cached, sendCachedMedia, updateCachedCaption, processUrl,
+    redditMediaCacheKey: (value: string) => value, getCachedMedia: () => cached, sendCachedMedia, updateCachedCaption, processUrl,
     trackChatActivity: () => {}, createTempDir: () => '/tmp/unused', cleanupTempDir: () => {},
     setInterval: () => 1, clearInterval: () => {}, formatLog: () => '', console: { log: vi.fn() },
   });
@@ -45,4 +46,30 @@ it.each([[true, ''], [false, ''], [true, '\n\n(some content could not be downloa
   expect(processUrl).not.toHaveBeenCalled();
   if (available) expect(updateCachedCaption).toHaveBeenCalledWith(url, cached.caption, caption);
   else expect(updateCachedCaption).not.toHaveBeenCalled();
+});
+
+it('ignores a legacy parent-image cache entry for a Reddit share link', async () => {
+  const share = 'https://www.reddit.com/r/youll_be_banned/s/Bd5rDiyc6b';
+  const start = main.indexOf('bot.on(message("text"), ');
+  const block = main.slice(start, main.indexOf('\nconst initializeBot', start)).trim();
+  const handlerCode = ts.transpileModule(`const handler = ${block.slice('bot.on(message("text"), '.length, -2)};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const legacy = new Map([[share, { files: [{ telegram_file_id: 'parent' }] }]]);
+  const sendCachedMedia = vi.fn(async () => true);
+  const processUrl = vi.fn(async () => ({ files: [{}] }));
+  const setCachedMedia = vi.fn();
+  const pass = (files: unknown) => files;
+  const handler = runInNewContext(handlerCode + '\nhandler;', {
+    findAllMatches: () => [{ url: share, pattern: {} }], DownloadTrace,
+    redditMediaCacheKey, getCachedMedia: (key: string) => legacy.get(key), sendCachedMedia, processUrl,
+    processMediaFiles: pass, filterByTelegramLimits: pass, buildCaption: () => share,
+    sendMediaAlbum: async () => [{ telegram_file_id: 'comment' }], setCachedMedia,
+    trackChatActivity: () => {}, createTempDir: () => '/tmp/unused', cleanupTempDir: () => {},
+    setInterval: () => 1, clearInterval: () => {}, formatLog: () => '', console: { log: vi.fn() },
+  });
+  await handler({ message: { text: share, message_id: 1 }, sendChatAction: async () => {} });
+  expect(sendCachedMedia).not.toHaveBeenCalled();
+  expect(processUrl).toHaveBeenCalledOnce();
+  expect(setCachedMedia).toHaveBeenCalledWith(expect.objectContaining({ url: redditMediaCacheKey(share), files: [{ telegram_file_id: 'comment' }] }));
 });

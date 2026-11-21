@@ -157,7 +157,10 @@ describe("getRedditDirectMediaUrls", () => {
     ]);
   });
 
-  it("returns media from the linked reddit comment instead of the parent post", async () => {
+  it.each([
+    "https://www.reddit.com/r/WaterfallDump/comments/1w6b4ql/comment/p7n3qnc/",
+    "https://m.reddit.com/u/WaterfallDump/comments/1w6b4ql/title.with.dot/p7n3qnc/",
+  ])("returns media from the linked reddit comment instead of the parent post: %s", async url => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -211,7 +214,7 @@ describe("getRedditDirectMediaUrls", () => {
 
     await expect(
       getRedditDirectMediaUrls(
-        "https://www.reddit.com/r/WaterfallDump/comments/1w6b4ql/comment/p7n3qnc/",
+        url,
         fetchMock as any
       )
     ).resolves.toEqual([
