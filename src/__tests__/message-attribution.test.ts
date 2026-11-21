@@ -14,7 +14,7 @@ async function handle(count: number, oversized = false, deliveryFailure = false)
     DownloadTrace, findAllMatches: () => Array.from({ length: count }, (_, i) => ({ url: 'https://x.com/a/status/' + i, pattern: {} })),
     trackChatActivity: () => {}, createTempDir: () => '/tmp/test', cleanupTempDir: () => {}, setInterval: () => 1, clearInterval: () => {},
     console: { log: () => {}, error: () => {} }, formatLog: (_ctx: unknown, m: string) => m,
-    getCachedMedia: () => null, processMediaFiles: async (files: unknown) => files,
+    redditMediaCacheKey: (value: string) => value, getCachedMedia: () => null, processMediaFiles: async (files: unknown) => files,
     filterByTelegramLimits: (files: unknown[]) => oversized ? [] : files,
     processUrl: async (_ctx: unknown, _url: string, _pattern: unknown, _dir: string, trace: DownloadTrace) => {
       try { await trace.run('gallery-dl', async () => { throw new Error('failed'); }, Boolean); } catch {}

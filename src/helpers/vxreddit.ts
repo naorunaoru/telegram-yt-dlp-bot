@@ -4,8 +4,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { getRedditComment, isRedditShareUrl } from './reddit';
 
-const REDDIT_HOSTS = new Set(['reddit.com', 'www.reddit.com', 'old.reddit.com', 'm.reddit.com']);
+const REDDIT_HOSTS = /^(?:(?:www|old|m)\.)?reddit(?:media)?\.com$/;
 const IMAGE_HOSTS = new Set(['i.redd.it', 'preview.redd.it']);
 // Exact offload origin observed from vxreddit's /redditvideo.mp4 endpoint.
 // Fail closed if the operator changes it; never allow arbitrary *.on.aws URLs.
@@ -25,8 +26,8 @@ const safeHttps = (value: string): URL | undefined => {
 export const isVxRedditSupported = (value: string): boolean => {
   try {
     const url = new URL(value);
-    if (!['https:', 'http:'].includes(url.protocol) || !REDDIT_HOSTS.has(url.hostname) || url.username || url.password || url.port) return false;
-    return /^\/(?:(?:r|u|user)\/[^/]+\/)?(?:comments\/[a-z0-9]+(?:\/[^/]+){0,2}|s\/[a-z0-9]+)\/?$/i.test(url.pathname);
+    if (!['https:', 'http:'].includes(url.protocol) || !REDDIT_HOSTS.test(url.hostname) || url.username || url.password || url.port) return false;
+    return Boolean(getRedditComment(value)) || /^\/(?:(?:r|u|user)\/[^/]+\/)?(?:comments\/[a-z0-9]+(?:\/[^/]+)?|s\/[a-z0-9]+)\/?$/i.test(url.pathname);
   } catch { return false; }
 };
 
@@ -93,7 +94,8 @@ export const getVxRedditFallback = async (
 ): Promise<VxRedditFallback | undefined> => {
   if (!isVxRedditSupported(value)) return undefined;
   const url = new URL('https://vxreddit.com');
-  url.pathname = new URL(value).pathname;
+  const requested = getRedditComment(value);
+  url.pathname = requested ? `${requested.prefix}comments/${requested.postId}/_/${requested.commentId}/` : new URL(value).pathname;
   url.searchParams.set('legacy', '1');
   const response = await (options.fetchImpl || fetch)(url.toString(), {
     redirect: 'manual', headers: { 'user-agent': 'Discordbot/2.0', accept: 'text/html' },
@@ -102,6 +104,19 @@ export const getVxRedditFallback = async (
   if (!response.ok) { await response.body?.cancel(); throw new Error(`vxreddit returned HTTP ${response.status}`); }
   if (!response.headers.get('content-type')?.includes('text/html')) { await response.body?.cancel(); throw new Error('vxreddit did not return an HTML embed'); }
   const meta = parseMeta(await readHtml(response));
+  const identities = meta.get('og:url') || [];
+  const comment = identities.length === 1 ? getRedditComment(identities[0]) : undefined;
+  const summary = meta.get('twitter:card')?.[0] === 'summary';
+  // An unresolved share might be a comment even when the mirror shows a post preview.
+  if (requested || isRedditShareUrl(value)) {
+    if (!comment || !summary || (requested && (requested.postId !== comment.postId || requested.commentId !== comment.commentId))) return undefined;
+    const descriptions = meta.get('og:description') || [];
+    const value = descriptions.length === 1 ? descriptions[0].trim() : '';
+    const attachment = !/\s/.test(value) && safeHttps(value);
+    if (!attachment || !/^\/[a-z0-9]+\.(?:jpe?g|png|gif|webp)$/i.test(attachment.pathname)) return undefined;
+    const image = safeMedia(attachment.toString(), 'photo');
+    return image ? { media: [image] } : undefined;
+  }
   const videos = [...(meta.get('og:video') || []), ...(meta.get('og:video:secure_url') || []), ...(meta.get('twitter:player:stream') || [])];
   // Link previews and incomplete video embeds only have a thumbnail, not post media.
   if (!videos.length && ['summary', 'player'].includes(meta.get('twitter:card')?.[0] || '')) return undefined;

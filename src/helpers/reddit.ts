@@ -1,5 +1,7 @@
-const REDDIT_SHARE_URL_RE = /^https?:\/\/(?:www\.|old\.)?reddit\.com\/(?:r\/[^/]+\/|user\/[^/]+\/)?s\/[^/?#&]+/i;
-const REDDIT_POST_URL_RE = /^https?:\/\/(?:www\.|old\.)?reddit\.com\/(?:(?:r|user)\/[^/]+\/)?comments\/[^/?#&]+/i;
+const REDDIT_SHARE_URL_RE = /^https?:\/\/(?:(?:www|old|m)\.)?reddit(?:media)?\.com\/(?:(?:r|u|user)\/[^/]+\/)?s\/[a-z0-9]+\/?(?:[?#].*)?$/i;
+const REDDIT_POST_URL_RE = /^https?:\/\/(?:(?:www|old|m)\.)?reddit(?:media)?\.com\/(?:(?:r|u|user)\/[^/]+\/)?comments\/[a-z0-9]+(?:\/[^/?#]+)?\/?(?:[?#].*)?$/i;
+
+export const isRedditShareUrl = (url: string): boolean => REDDIT_SHARE_URL_RE.test(url);
 
 const REDDIT_BROWSER_UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
@@ -57,24 +59,21 @@ type RedditCommentData = Pick<RedditPostData, "media_metadata"> & {
   richtext_json?: unknown;
 };
 
-const getRedditCommentId = (url: string): string | undefined => {
+export const getRedditComment = (url: string): { prefix: string; postId: string; commentId: string } | undefined => {
   try {
-    const segments = new URL(url).pathname.split("/").filter(Boolean);
-    const commentsIndex = segments.indexOf("comments");
-    const permalinkTail = segments.slice(commentsIndex + 1);
-
-    // Both current (/comments/<post>/comment/<comment>) and traditional
-    // (/comments/<post>/<slug>/<comment>) Reddit permalinks have three
-    // segments after "comments". Post permalinks only have one or two.
-    if (commentsIndex === -1 || permalinkTail.length !== 3) {
-      return undefined;
-    }
-
-    return /^[a-z0-9]+$/i.test(permalinkTail[2]) ? permalinkTail[2] : undefined;
+    const parsed = new URL(url);
+    if (!/^https?:$/.test(parsed.protocol) || !/^(?:(?:www|old|m)\.)?reddit(?:media)?\.com$/.test(parsed.hostname) ||
+        parsed.username || parsed.password || parsed.port) return;
+    const match = /^(\/(?:(?:r|u|user)\/[^/]+\/)?)comments\/([a-z0-9]+)\/[^/]+\/([a-z0-9]+)\/?$/i.exec(parsed.pathname);
+    if (match) return { prefix: match[1], postId: match[2], commentId: match[3] };
   } catch {
     return undefined;
   }
 };
+
+// Older entries may contain the parent post's media for a comment or share link.
+export const redditMediaCacheKey = (url: string): string =>
+  isRedditShareUrl(url) || getRedditComment(url) ? `reddit-target:v2:${url}` : url;
 
 const collectRichtextMediaIds = (value: unknown, ids: string[] = []): string[] => {
   if (Array.isArray(value)) {
@@ -166,7 +165,7 @@ export const resolveRedditShareUrl = async (
   fetchImpl: typeof fetch = fetch,
   env: Record<string, string | undefined> = process.env
 ): Promise<string> => {
-  if (!REDDIT_SHARE_URL_RE.test(url)) {
+  if (!isRedditShareUrl(url)) {
     return url;
   }
 
@@ -177,7 +176,7 @@ export const resolveRedditShareUrl = async (
       ...(headers ? { headers } : {}),
     });
 
-    if (response.url) {
+    if (response.url && (getRedditComment(response.url) || REDDIT_POST_URL_RE.test(response.url))) {
       return stripTrackingParams(response.url);
     }
   } catch {
@@ -198,7 +197,8 @@ export const getRedditDirectMediaUrls = async (
   env: Record<string, string | undefined> = process.env
 ): Promise<string[]> => {
   const canonicalUrl = await resolveRedditShareUrl(url, fetchImpl, env);
-  if (!REDDIT_POST_URL_RE.test(canonicalUrl)) {
+  const commentTarget = getRedditComment(canonicalUrl);
+  if (!commentTarget && !REDDIT_POST_URL_RE.test(canonicalUrl)) {
     return [];
   }
 
@@ -214,7 +214,9 @@ export const getRedditDirectMediaUrls = async (
       return [];
     }
 
-    const parsed = new URL(canonicalUrl);
+    const parsed = new URL(commentTarget
+      ? `https://www.reddit.com/comments/${commentTarget.postId}/comment/${commentTarget.commentId}/`
+      : canonicalUrl);
     parsed.search = "";
     parsed.hash = "";
     parsed.pathname = parsed.pathname.replace(/\/+$/, "") + "/.json";
@@ -232,7 +234,7 @@ export const getRedditDirectMediaUrls = async (
 
     const data = (await jsonResponse.json()) as any[];
 
-    const commentId = getRedditCommentId(canonicalUrl);
+    const commentId = commentTarget?.commentId;
     if (commentId) {
       const comment = findRedditComment(data, commentId);
       if (!comment) {

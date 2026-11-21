@@ -4,13 +4,37 @@ import os from 'node:os';
 import path from 'node:path';
 import { getVxRedditFallback, downloadVxRedditMedia, isVxRedditSupported } from '../helpers/vxreddit';
 
-const url = 'https://www.reddit.com/r/AutoTuga/s/u9oXydAkCU';
+const url = 'https://www.reddit.com/r/AutoTuga/comments/1xxj8ga/';
 const mediaUrl = 'https://i.redd.it/l5kwze2vfx1i1.jpeg';
 const html = `<meta property="og:title" content="A &amp; B"><meta property="og:image" content="${mediaUrl}">`;
 const directories: string[] = [];
 afterEach(async () => { for (const dir of directories.splice(0)) await fs.rm(dir, { recursive: true, force: true }); });
 
 describe('vxreddit fallback', () => {
+  it.each(['', '<meta property="og:url" content="https://www.reddit.com/comments/1y1mcuu/">'])('rejects an unresolved share with a generic image preview (%#)', async identity => {
+    const embed = `${identity}<meta name="twitter:card" content="summary_large_image"><meta property="og:image" content="${mediaUrl}">`;
+    const share = 'https://www.reddit.com/r/youll_be_banned/s/Bd5rDiyc6b';
+    expect(await getVxRedditFallback(share, { fetchImpl: async () => new Response(embed, { headers: { 'content-type': 'text/html' } }) })).toBeUndefined();
+  });
+  it.each(['/r/test/comments/1y1mcuu/comment/19syb90anb7r7/', '/r/test/s/Bd5rDiyc6b'])('extracts a verified comment attachment from %s', async pathname => {
+    const attachment = 'https://preview.redd.it/ymzuq6p23w2i1.jpeg?width=1080&auto=webp';
+    const embed = `<meta property="og:url" content="https://www.reddit.com/comments/1y1mcuu/_/19syb90anb7r7"><meta name="twitter:card" content="summary"><meta property="og:image" content="${mediaUrl}"><meta property="og:description" content="${attachment.replace('&', '&amp;')}">`;
+    const fetchImpl = vi.fn(async () => new Response(embed, { headers: { 'content-type': 'text/html' } }));
+    expect((await getVxRedditFallback(`https://www.reddit.com${pathname}`, { fetchImpl }))?.media).toEqual([{ url: attachment, type: 'photo' }]);
+    expect(fetchImpl).toHaveBeenCalledWith(`https://vxreddit.com${pathname.includes('/comment/') ? '/r/test/comments/1y1mcuu/_/19syb90anb7r7/' : pathname}?legacy=1`, expect.anything());
+  });
+
+  it.each([
+    ['https://www.reddit.com/comments/1y1mcuu/', mediaUrl],
+    ['https://www.reddit.com/comments/1y1mcuu/_/other/', mediaUrl],
+    ['https://www.reddit.com/comments/1y1mcuu/_/19syb90anb7r7/', 'https://preview.redd.it.evil.test/photo.jpg'],
+    ['https://www.reddit.com/comments/1y1mcuu/_/19syb90anb7r7/', `Some text and ${mediaUrl}`],
+  ])('never returns parent media or unverified description images (%#)', async (identity, attachment) => {
+    const embed = `<meta property="og:url" content="${identity}"><meta name="twitter:card" content="summary"><meta property="og:image" content="${mediaUrl}"><meta property="og:description" content="${attachment}">`;
+    const comment = 'https://www.reddit.com/comments/1y1mcuu/comment/19syb90anb7r7/';
+    expect(await getVxRedditFallback(comment, { fetchImpl: async () => new Response(embed, { headers: { 'content-type': 'text/html' } }) })).toBeUndefined();
+  });
+
   it('cancels an oversized embed response before rejecting it', async () => {
     const cancel = vi.fn();
     const body = new ReadableStream({ cancel });
@@ -100,7 +124,7 @@ describe('vxreddit fallback', () => {
   it('requests the legacy embed anonymously and extracts the reported image', async () => {
     const fetchImpl = vi.fn(async () => new Response(html, { headers: { 'content-type': 'text/html' } }));
     expect(await getVxRedditFallback(url, { fetchImpl })).toEqual({ caption: 'A & B', media: [{ url: mediaUrl, type: 'photo' }] });
-    expect(fetchImpl).toHaveBeenCalledWith('https://vxreddit.com/r/AutoTuga/s/u9oXydAkCU?legacy=1', expect.objectContaining({
+    expect(fetchImpl).toHaveBeenCalledWith('https://vxreddit.com/r/AutoTuga/comments/1xxj8ga/?legacy=1', expect.objectContaining({
       redirect: 'manual', headers: { 'user-agent': 'Discordbot/2.0', accept: 'text/html' },
     }));
   });

@@ -38,6 +38,16 @@ beforeEach(() => {
   }
 });
 
+it("preserves the Reddit comment ID and drops tracking parameters", () => {
+  const url = "https://www.reddit.com/r/youll_be_banned/comments/1y1mcuu/comment/19syb90anb7r7";
+  expect(findAllMatches(`${url}/?context=3`).map(match => match.url)).toEqual([url + "/"]);
+  const dotted = 'https://m.reddit.com/u/person/comments/abc123/title.with.dot/def456/';
+  expect(findAllMatches(`${dotted}?context=3`).map(match => match.url)).toEqual([dotted]);
+  const alias = dotted.replace('m.reddit.com', 'www.redditmedia.com');
+  expect(findAllMatches(alias).map(match => match.url)).toEqual([alias]);
+  expect(findAllMatches(`See ${dotted.slice(0, -1)}.`).map(match => match.url)).toEqual([dotted.slice(0, -1)]);
+});
+
 describe("TikTok patterns", () => {
   it("matches standard video URLs", () => {
     expect(findMatch("https://www.tiktok.com/@user/video/1234567890")).not.toBeNull();
